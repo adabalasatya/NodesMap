@@ -45,7 +45,7 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
       <div className="w-full max-w-md">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
-            <div className="size-8 rounded-lg bg-[var(--accent)] grid place-items-center text-white font-semibold">
+            <div className="size-8 rounded-full bg-[var(--accent)] grid place-items-center text-white font-semibold">
               N
             </div>
             <span className="font-semibold tracking-tight">NoteFlow</span>

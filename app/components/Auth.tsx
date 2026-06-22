@@ -68,7 +68,7 @@ function SignInModal({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-center gap-2 mb-1">
-          <div className="size-8 rounded-lg bg-[var(--accent)] grid place-items-center text-white font-semibold">
+          <div className="size-8 rounded-full bg-[var(--accent)] grid place-items-center text-white font-semibold">
             N
           </div>
           <span className="font-semibold tracking-tight">NoteFlow</span>
@@ -136,7 +136,7 @@ export default function Auth() {
       {/* Floating pill nav */}
       <header className="sticky top-4 z-40 mx-auto mt-4 flex max-w-3xl items-center justify-between gap-4 rounded-full border border-[var(--border)] bg-[var(--surface)]/80 px-3 py-2 pl-4 shadow-sm backdrop-blur">
         <div className="flex items-center gap-2">
-          <div className="size-7 rounded-lg bg-[var(--accent)] grid place-items-center text-white font-semibold text-sm">
+          <div className="size-7 rounded-full bg-[var(--accent)] grid place-items-center text-white font-semibold text-sm">
             N
           </div>
           <span className="font-semibold tracking-tight">NoteFlow</span>
@@ -172,9 +172,7 @@ export default function Auth() {
         <h1 className="mt-6 text-4xl sm:text-6xl font-semibold tracking-tight leading-[1.05]">
           Your notes,
           <br />
-          <span className="bg-gradient-to-r from-[var(--accent)] to-[#7c3aed] bg-clip-text text-transparent">
-            beautifully organized.
-          </span>
+          <span className="text-[var(--accent)]">beautifully organized.</span>
         </h1>
         <p className="mt-5 text-base sm:text-lg text-[var(--muted)] max-w-xl mx-auto">
           Turn Markdown notes into trackable folders, a progress dashboard, and

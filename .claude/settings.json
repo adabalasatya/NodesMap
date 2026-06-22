@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo \"---EXIT:$?---\")",
+      "Bash(mkdir -p public/showcase)",
+      "Bash(cp \"images/WhatsApp Image 2026-06-22 at 5.39.12 PM.jpeg\" public/showcase/dashboard.jpeg)",
+      "Bash(cp \"images/WhatsApp Image 2026-06-22 at 5.39.38 PM.jpeg\" public/showcase/folder.jpeg)",
+      "Bash(cp \"images/WhatsApp Image 2026-06-22 at 5.39.38 PM \\(1\\).jpeg\" public/showcase/progress.jpeg)",
+      "Bash(cp \"images/WhatsApp Image 2026-06-22 at 5.39.39 PM.jpeg\" public/showcase/mindmap.jpeg)",
+      "Bash(taskkill //F //PID 2820)",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(curl -s -o /dev/null -w \"localhost:3000 -> HTTP %{http_code}\\\\n\" http://localhost:3000)",
+      "Bash(rm -f .next-dev.log)",
+      "Bash(gh auth *)",
+      "Bash(git config *)",
+      "Bash(git init *)",
+      "Bash(git commit -q -m ' *)"
+    ]
+  }
+}

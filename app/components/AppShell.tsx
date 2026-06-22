@@ -1,0 +1,89 @@
+"use client";
+
+import { useState } from "react";
+import { StoreProvider, useStore } from "../lib/store";
+import { AuthProvider, useAuth } from "../lib/auth";
+import Sidebar from "./Sidebar";
+import Dashboard from "./Dashboard";
+import FolderView from "./FolderView";
+import Editor from "./Editor";
+import ProgressView from "./ProgressView";
+import MindMap from "./MindMap";
+import TopBar from "./TopBar";
+import Auth from "./Auth";
+import Onboarding, { onboardingKey } from "./Onboarding";
+
+function Workspace() {
+  const { state } = useStore();
+  return (
+    <main className="flex-1 min-w-0 flex flex-col h-screen relative">
+      <TopBar />
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {state.view === "dashboard" && <Dashboard />}
+        {state.view === "folder" && <FolderView />}
+        {state.view === "editor" && <Editor />}
+        {state.view === "progress" && <ProgressView />}
+        {state.view === "mindmap" && <MindMap />}
+      </div>
+    </main>
+  );
+}
+
+function App() {
+  return (
+    <StoreProvider>
+      <div className="flex h-screen w-screen bg-[var(--background)] text-[var(--foreground)]">
+        <Sidebar />
+        <Workspace />
+      </div>
+    </StoreProvider>
+  );
+}
+
+function AuthedApp() {
+  const { user } = useAuth();
+  const [onboarded, setOnboarded] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      return localStorage.getItem(onboardingKey(user?.id)) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  if (!onboarded) return <Onboarding onDone={() => setOnboarded(true)} />;
+  return <App />;
+}
+
+function AuthGate() {
+  const { status } = useAuth();
+  if (status === "initializing")
+    return (
+      <div className="min-h-screen grid place-items-center text-sm text-[var(--muted)]">
+        Loading…
+      </div>
+    );
+  if (status === "disabled")
+    return (
+      <div className="min-h-screen grid place-items-center p-8">
+        <div className="max-w-md text-center">
+          <h1 className="text-xl font-semibold mb-2">Supabase not configured</h1>
+          <p className="text-sm text-[var(--muted)]">
+            Add <code>NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
+            <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> to your{" "}
+            <code>.env.local</code>, then restart the dev server.
+          </p>
+        </div>
+      </div>
+    );
+  if (status === "unauthenticated") return <Auth />;
+  return <AuthedApp />;
+}
+
+export default function AppShell() {
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
+  );
+}

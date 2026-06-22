@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NoteFlow — Markdown notes & progress tracker",
+  title: "nodesmap — Markdown notes & progress tracker",
   description:
     "Hierarchical markdown notes with completion tracking, progress analytics, and a radial mind-map view.",
 };

@@ -339,7 +339,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               folderId: sampleFolderId,
               title: "Welcome",
               content:
-                "# Welcome to NoteFlow\n\nThis is a markdown note. Try:\n\n- **Bold**, _italic_, `inline code`\n- Task lists:\n  - [ ] Open a folder\n  - [ ] Create a new note\n  - [x] Read this file\n\n> Tip: toggle the **Mind map** view from the top-right.",
+                "# Welcome to nodesmap\n\nThis is a markdown note. Try:\n\n- **Bold**, _italic_, `inline code`\n- Task lists:\n  - [ ] Open a folder\n  - [ ] Create a new note\n  - [x] Read this file\n\n> Tip: toggle the **Mind map** view from the top-right.",
               isCompleted: false,
               updatedAt: Date.now(),
             },

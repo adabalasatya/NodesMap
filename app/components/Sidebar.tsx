@@ -348,7 +348,7 @@ export default function Sidebar() {
         {user && (
           <button
             onClick={() => {
-              if (confirm("Sign out of NoteFlow?")) signOut();
+              if (confirm("Sign out of nodesmap?")) signOut();
             }}
             className="shrink-0 p-2 rounded-lg border border-[var(--border)] text-[var(--muted)] hover:text-[var(--danger)] hover:border-[var(--danger)]/40 transition"
             aria-label="Sign out"

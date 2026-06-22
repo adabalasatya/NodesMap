@@ -41,11 +41,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     const sb = getSupabase();
     let mounted = true;
-    sb.auth.getSession().then(({ data }) => {
+
+    // If we just came back from Google, the URL carries ?code=... — exchange
+    // it for a session *before* deciding auth state, so the user lands inside
+    // on the first attempt instead of bouncing back to the landing page.
+    const finishOAuthRedirect = async () => {
+      if (typeof window === "undefined") return;
+      const params = new URLSearchParams(window.location.search);
+      const hasOAuthParams =
+        params.has("code") || params.has("error") || params.has("error_description");
+      if (params.has("code")) {
+        try {
+          await sb.auth.exchangeCodeForSession(window.location.search);
+        } catch {
+          // Fall through — getSession() below resolves the real state.
+        }
+      }
+      if (hasOAuthParams) {
+        const clean = window.location.pathname + window.location.hash;
+        window.history.replaceState({}, "", clean);
+      }
+    };
+
+    (async () => {
+      await finishOAuthRedirect();
+      const { data } = await sb.auth.getSession();
       if (!mounted) return;
       setSession(data.session);
       setStatus(data.session ? "authenticated" : "unauthenticated");
-    });
+    })();
+
     const { data: sub } = sb.auth.onAuthStateChange((_event, s) => {
       setSession(s);
       setStatus(s ? "authenticated" : "unauthenticated");

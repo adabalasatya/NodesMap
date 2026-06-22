@@ -14,7 +14,8 @@
       "Bash(gh auth *)",
       "Bash(git config *)",
       "Bash(git init *)",
-      "Bash(git commit -q -m ' *)"
+      "Bash(git commit -q -m ' *)",
+      "Bash(git branch *)"
     ]
   }
 }

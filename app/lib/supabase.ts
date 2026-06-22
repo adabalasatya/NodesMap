@@ -15,7 +15,17 @@ export function getSupabase(): SupabaseClient {
       "Supabase env vars missing. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in .env.local."
     );
   }
-  _client = createBrowserClient(url, key);
+  _client = createBrowserClient(url, key, {
+    auth: {
+      flowType: "pkce",
+      persistSession: true,
+      autoRefreshToken: true,
+      // We exchange the OAuth code ourselves in AuthProvider so the UI can
+      // wait for it; disabling auto-detection avoids a race that left the
+      // user on the landing page after the first Google sign-in.
+      detectSessionInUrl: false,
+    },
+  });
   return _client;
 }
 

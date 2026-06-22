@@ -71,10 +71,10 @@ function SignInModal({ onClose }: { onClose: () => void }) {
           <div className="size-8 rounded-full bg-[var(--accent)] grid place-items-center text-white font-semibold">
             N
           </div>
-          <span className="font-semibold tracking-tight">nodesmap</span>
+          <span className="font-semibold tracking-tight">NodesMap</span>
         </div>
         <h2 className="text-center text-lg font-semibold mt-3">
-          Continue to nodesmap
+          Continue to NodesMap
         </h2>
         <p className="text-center text-sm text-[var(--muted)] mt-1">
           Pick a Google account. We&apos;ll sign you in, or create your account
@@ -139,7 +139,7 @@ export default function Auth() {
           <div className="size-7 rounded-full bg-[var(--accent)] grid place-items-center text-white font-semibold text-sm">
             N
           </div>
-          <span className="font-semibold tracking-tight">nodesmap</span>
+          <span className="font-semibold tracking-tight">NodesMap</span>
         </div>
         <nav className="flex items-center gap-1 text-sm">
           <button
@@ -241,7 +241,7 @@ export default function Auth() {
             Need a hand?
           </h2>
           <p className="mt-3 text-sm sm:text-base text-[var(--muted)] max-w-md mx-auto leading-relaxed">
-            Stuck, found a bug, or have an idea to make nodesmap better? We&apos;d
+            Stuck, found a bug, or have an idea to make NodesMap better? We&apos;d
             genuinely love to hear from you — drop us a line any time and we
             usually reply within a day.
           </p>
@@ -256,7 +256,7 @@ export default function Auth() {
 
       {/* Footer */}
       <footer className="border-t border-[var(--border)] py-8 text-center text-xs text-[var(--muted)]">
-        © nodesmap — Markdown notes &amp; progress tracker
+        © NodesMap — Markdown notes &amp; progress tracker
       </footer>
 
       {showSignIn && <SignInModal onClose={() => setShowSignIn(false)} />}

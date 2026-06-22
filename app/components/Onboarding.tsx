@@ -6,7 +6,7 @@ import { useAuth } from "../lib/auth";
 const STEPS = [
   {
     img: "/showcase/dashboard.jpeg",
-    title: "Welcome to nodesmap",
+    title: "Welcome to NodesMap",
     desc: "Everything lives in colour-coded folders. Create one per topic and your notes stay tidy from day one.",
   },
   {
@@ -48,7 +48,7 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
             <div className="size-8 rounded-full bg-[var(--accent)] grid place-items-center text-white font-semibold">
               N
             </div>
-            <span className="font-semibold tracking-tight">nodesmap</span>
+            <span className="font-semibold tracking-tight">NodesMap</span>
           </div>
           <button
             onClick={finish}

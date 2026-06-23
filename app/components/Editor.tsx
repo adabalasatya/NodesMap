@@ -8,13 +8,19 @@ import {
   useState,
 } from "react";
 import { useStore } from "../lib/store";
+import { useAuth } from "../lib/auth";
 import { renderMarkdown } from "../lib/markdown";
+import { clearDraft, readDraft, writeDraft } from "../lib/draftSync";
+import { hasSupabaseConfig, upsertFile } from "../lib/supabase";
 import {
   ArrowDownIcon,
   CheckIcon,
   ChevronLeftIcon,
   TrashIcon,
 } from "./icons";
+
+const SYNC_DEBOUNCE_MS = 30_000;
+type SaveStatus = "saved" | "editing" | "syncing" | "failed";
 
 const FONT_STEPS = [10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48];
 const DEFAULT_FONT = 14;
@@ -57,18 +63,34 @@ const emptyFormats: Formats = {
 
 export default function Editor() {
   const { state, dispatch } = useStore();
+  const { user } = useAuth();
   const file = state.files.find((f) => f.id === state.currentFileId);
   const folder = state.folders.find((f) => f.id === state.currentFolderId);
   const editorRef = useRef<HTMLDivElement>(null);
   const lastWrittenContent = useRef<string>("");
   const loadedFileId = useRef<string | null>(null);
   const [formats, setFormats] = useState<Formats>(emptyFormats);
+  const [status, setStatus] = useState<SaveStatus>("saved");
+  const debounceRef = useRef<number | null>(null);
+  const pendingFileRef = useRef<string | null>(null);
+  const statePulse = useRef(state);
+  statePulse.current = state;
 
+  // Compute the HTML to load: a localStorage draft (if present) wins over
+  // the Supabase-synced content, since the draft is by definition newer.
   const initialHtml = useMemo(() => {
-    const content = file?.content ?? "";
-    if (!content) return "";
-    if (/<[a-z][^>]*>/i.test(content)) return content;
-    return renderMarkdown(content);
+    if (!file) return "";
+    const draft = readDraft(file.id);
+    const source = draft?.content ?? file.content ?? "";
+    if (!source) return "";
+    if (/<[a-z][^>]*>/i.test(source)) return source;
+    return renderMarkdown(source);
+  }, [file?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Did we load from a draft on open? Reflect that in the status badge.
+  const initialStatus = useMemo<SaveStatus>(() => {
+    if (!file) return "saved";
+    return readDraft(file.id) ? "editing" : "saved";
   }, [file?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -77,20 +99,130 @@ export default function Editor() {
     loadedFileId.current = file.id;
     editorRef.current.innerHTML = initialHtml;
     lastWrittenContent.current = initialHtml;
+    setStatus(initialStatus);
     editorRef.current.focus();
-  }, [file, initialHtml]);
+    // If we loaded a draft, hydrate in-memory state so other views see the
+    // freshest content too.
+    const draft = readDraft(file.id);
+    if (draft && draft.content !== file.content) {
+      dispatch({
+        type: "UPDATE_FILE",
+        payload: { id: file.id, content: draft.content },
+      });
+    }
+  }, [file, initialHtml, initialStatus, dispatch]);
 
+  // Push the latest content of `fileId` to Supabase. Returns true on a
+  // confirmed save (draft cleared); false otherwise (draft preserved so a
+  // later useStaleDraftSync run can retry).
+  const syncToServer = useCallback(
+    async (fileId: string, content: string): Promise<boolean> => {
+      if (!hasSupabaseConfig() || !user) {
+        return false;
+      }
+      const f = statePulse.current.files.find((x) => x.id === fileId);
+      if (!f) return false;
+      try {
+        await upsertFile({
+          ...f,
+          content,
+          updatedAt: Date.now(),
+        });
+        clearDraft(fileId);
+        return true;
+      } catch (e) {
+        console.warn("Editor sync failed:", e);
+        return false;
+      }
+    },
+    [user]
+  );
+
+  const armDebounce = useCallback(
+    (fileId: string) => {
+      if (debounceRef.current !== null) {
+        clearTimeout(debounceRef.current);
+      }
+      pendingFileRef.current = fileId;
+      debounceRef.current = window.setTimeout(async () => {
+        debounceRef.current = null;
+        const targetId = pendingFileRef.current;
+        if (!targetId) return;
+        const draft = readDraft(targetId);
+        if (!draft) {
+          setStatus("saved");
+          return;
+        }
+        setStatus("syncing");
+        const ok = await syncToServer(targetId, draft.content);
+        setStatus(ok ? "saved" : "failed");
+        if (ok) pendingFileRef.current = null;
+      }, SYNC_DEBOUNCE_MS);
+    },
+    [syncToServer]
+  );
+
+  // Editor input → write draft instantly, dispatch in-memory state, status
+  // "editing", reset the 30-second timer.
   const flush = useCallback(() => {
     const el = editorRef.current;
     if (!el || !file) return;
     const html = el.innerHTML;
     if (html === lastWrittenContent.current) return;
     lastWrittenContent.current = html;
+    writeDraft(file.id, html);
     dispatch({
       type: "UPDATE_FILE",
       payload: { id: file.id, content: html },
     });
-  }, [dispatch, file]);
+    setStatus("editing");
+    armDebounce(file.id);
+  }, [dispatch, file, armDebounce]);
+
+  // Manual retry hook for the failed state.
+  const retrySync = useCallback(async () => {
+    if (!file) return;
+    const draft = readDraft(file.id);
+    if (!draft) {
+      setStatus("saved");
+      return;
+    }
+    setStatus("syncing");
+    const ok = await syncToServer(file.id, draft.content);
+    setStatus(ok ? "saved" : "failed");
+  }, [file, syncToServer]);
+
+  // On file switch / unmount, flush any pending draft synchronously to
+  // Supabase before letting go.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current !== null) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      const targetId = pendingFileRef.current;
+      pendingFileRef.current = null;
+      if (!targetId) return;
+      const draft = readDraft(targetId);
+      if (!draft) return;
+      // fire-and-forget; the draft survives until the upsert resolves.
+      void syncToServer(targetId, draft.content);
+    };
+  }, [file?.id, syncToServer]);
+
+  // beforeunload — flush whatever's pending. We can't await the network,
+  // but the upsert is dispatched and the draft remains for stale recovery.
+  useEffect(() => {
+    const onBeforeUnload = () => {
+      const targetId = pendingFileRef.current;
+      if (!targetId) return;
+      const draft = readDraft(targetId);
+      if (!draft) return;
+      void syncToServer(targetId, draft.content);
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [syncToServer]);
 
   const updateFormats = useCallback(() => {
     const el = editorRef.current;
@@ -99,9 +231,34 @@ export default function Editor() {
     if (!sel || sel.rangeCount === 0) return;
     const node = sel.anchorNode;
     if (!node || !el.contains(node)) return;
-    const blockTag = (
-      document.queryCommandValue("formatBlock") || ""
-    ).toLowerCase();
+    // Some browsers return "<h1>" with brackets, others return "h1" or
+    // "heading 1" — normalize.
+    const rawBlock = String(document.queryCommandValue("formatBlock") || "")
+      .toLowerCase()
+      .replace(/[<>]/g, "")
+      .trim();
+    // Walk up to find the innermost block element as a fallback.
+    let walker: Element | null = elNodeFromSelection(node);
+    let foundBlock = "";
+    while (walker && walker !== el) {
+      const t = walker.tagName?.toLowerCase();
+      if (
+        t === "h1" ||
+        t === "h2" ||
+        t === "h3" ||
+        t === "h4" ||
+        t === "h5" ||
+        t === "h6" ||
+        t === "p" ||
+        t === "pre" ||
+        t === "blockquote"
+      ) {
+        foundBlock = t;
+        break;
+      }
+      walker = walker.parentElement;
+    }
+    const blockTag = foundBlock || rawBlock;
     const elNode =
       node.nodeType === Node.ELEMENT_NODE
         ? (node as Element)
@@ -337,18 +494,14 @@ export default function Editor() {
       if (!sel || sel.rangeCount === 0) return;
       const node = sel.anchorNode;
       if (!node || !el.contains(node)) return;
-      const codeEl =
-        node.nodeType === Node.ELEMENT_NODE
-          ? (node as Element).closest("pre")
-          : node.parentElement?.closest("pre");
+      const startEl = elNodeFromSelection(node);
+
+      // 1) Inside <pre><code> — exit on a trailing-blank-line Enter.
+      const codeEl = startEl?.closest("pre");
       if (codeEl) {
-        // In a <pre><code> block: on a trailing empty line, exit to the
-        // next sibling paragraph.
         const codeText = codeEl.textContent ?? "";
-        const endsWithNewline = codeText.endsWith("\n");
-        if (endsWithNewline) {
+        if (codeText.endsWith("\n")) {
           e.preventDefault();
-          // Strip the trailing newline we just typed in code.
           const codeInner = codeEl.querySelector("code") ?? codeEl;
           codeInner.textContent = codeText.replace(/\n+$/, "");
           let next = codeEl.nextElementSibling;
@@ -360,11 +513,42 @@ export default function Editor() {
           }
           placeCaretIn(next as HTMLElement);
           flush();
+          updateFormats();
           return;
         }
+        return; // let default insert a newline inside the code block
+      }
+
+      // 2) Inside any <li> — on Enter at an empty item, exit the list.
+      const li = startEl?.closest("li");
+      if (li) {
+        const liText = (li.textContent ?? "").replace(/​/g, "");
+        const onlyBr = li.children.length === 1 && li.firstElementChild?.tagName === "BR";
+        const isEmpty = liText.trim() === "" || onlyBr || li.innerHTML === "";
+        if (isEmpty) {
+          e.preventDefault();
+          const list = li.parentElement;
+          const p = document.createElement("p");
+          p.appendChild(document.createElement("br"));
+          if (list) {
+            list.after(p);
+            li.remove();
+            if (list.children.length === 0) list.remove();
+          } else {
+            li.replaceWith(p);
+          }
+          placeCaretIn(p);
+          flush();
+          updateFormats();
+          return;
+        }
+        // Non-empty li: let the browser create a new <li>. The new <li>
+        // inherits the parent <ul class="cb-list|rb-list"> so the marker
+        // is drawn by our CSS.
+        return;
       }
     },
-    [flush]
+    [flush, updateFormats]
   );
 
   if (!file || !folder) {
@@ -407,6 +591,7 @@ export default function Editor() {
           >
             <ChevronLeftIcon size={14} /> Files
           </button>
+          <SyncBadge status={status} onRetry={retrySync} />
           <div className="flex-1" />
           <button
             onClick={() =>
@@ -476,6 +661,12 @@ export default function Editor() {
 }
 
 /* ---------------------- helpers ---------------------- */
+
+function elNodeFromSelection(node: Node): Element | null {
+  return node.nodeType === Node.ELEMENT_NODE
+    ? (node as Element)
+    : node.parentElement;
+}
 
 function placeCaretIn(el: HTMLElement) {
   const r = document.createRange();
@@ -727,7 +918,7 @@ function TbButton({
       onClick={onClick}
       className={`min-w-7 h-7 px-2 rounded-md text-xs grid place-items-center transition ${
         active
-          ? "bg-[var(--surface-2)] text-[var(--foreground)] ring-1 ring-[var(--accent)]/40"
+          ? "bg-[var(--accent)] text-white shadow-sm"
           : "text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)]"
       }`}
     >
@@ -826,6 +1017,59 @@ function ListGlyph({
       <circle cx="5" cy="17" r="1.2" fill="currentColor" />
       <path d="M10 7h12M10 12h12M10 17h12" />
     </svg>
+  );
+}
+
+function SyncBadge({
+  status,
+  onRetry,
+}: {
+  status: SaveStatus;
+  onRetry: () => void;
+}) {
+  const base =
+    "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium tabular-nums select-none";
+  if (status === "editing") {
+    return (
+      <span
+        className={`${base} bg-[var(--surface-2)] text-[var(--muted)]`}
+        title="You have unsaved changes — syncing in 30s"
+      >
+        <span className="inline-block size-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
+        Editing…
+      </span>
+    );
+  }
+  if (status === "syncing") {
+    return (
+      <span
+        className={`${base} bg-[var(--surface-2)] text-[var(--muted)]`}
+        title="Saving to cloud"
+      >
+        <span className="inline-block size-3 rounded-full border border-[var(--accent)] border-t-transparent animate-spin" />
+        Syncing…
+      </span>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <button
+        type="button"
+        onClick={onRetry}
+        className={`${base} text-[var(--danger)] border border-[var(--danger)]/40 bg-[var(--danger)]/5 hover:bg-[var(--danger)]/10`}
+        title="Sync failed — click to retry"
+      >
+        ⚠ Sync failed · retry
+      </button>
+    );
+  }
+  return (
+    <span
+      className={`${base} text-[var(--muted)]`}
+      title="All changes saved"
+    >
+      <CheckIcon size={11} /> Saved
+    </span>
   );
 }
 

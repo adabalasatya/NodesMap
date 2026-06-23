@@ -483,10 +483,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     });
     currFiles.forEach((f) => {
       const prev = synced.files.get(f.id);
+      // Content sync is owned by the Editor (30s debounce + draft layer in
+      // app/lib/draftSync.ts). Only metadata changes trigger an immediate
+      // upsert here — content travels with whatever metadata push fires.
       if (
         !prev ||
         prev.title !== f.title ||
-        prev.content !== f.content ||
         prev.isCompleted !== f.isCompleted ||
         prev.folderId !== f.folderId
       )

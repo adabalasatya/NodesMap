@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StoreProvider, useStore } from "../lib/store";
 import { AuthProvider, useAuth } from "../lib/auth";
+import { syncStaleDrafts } from "../lib/draftSync";
 import Sidebar from "./Sidebar";
 import Dashboard from "./Dashboard";
 import FolderView from "./FolderView";
@@ -29,9 +30,32 @@ function Workspace() {
   );
 }
 
+/**
+ * On app start (after auth + file list are ready), push any crash-survivor
+ * `file_draft_*` entries to Supabase. See [app/lib/draftSync.ts].
+ */
+function StaleDraftSyncer() {
+  const { state } = useStore();
+  const { user } = useAuth();
+  const ran = useRef(false);
+  useEffect(() => {
+    if (ran.current) return;
+    if (!user) return;
+    // Wait until the local state is materialized so we can match drafts
+    // against real file rows (orphan drafts get dropped).
+    if (state.files.length === 0 && state.folders.length === 0) return;
+    ran.current = true;
+    syncStaleDrafts(state.files).catch((e) =>
+      console.warn("syncStaleDrafts:", e)
+    );
+  }, [user, state.files, state.folders]);
+  return null;
+}
+
 function App() {
   return (
     <StoreProvider>
+      <StaleDraftSyncer />
       <div className="flex h-screen w-screen bg-[var(--background)] text-[var(--foreground)]">
         <Sidebar />
         <Workspace />

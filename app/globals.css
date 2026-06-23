@@ -290,41 +290,34 @@ body {
   animation: fadeIn 180ms ease-out;
 }
 
-/* Mind map animations — staggered reveal + subtle hover scale */
+/* Mind map animations — opacity / filter only so we never fight with the
+   per-node SVG `transform="translate(x y)"` attribute that positions each
+   node. (Using CSS `transform` would override the translate and collapse
+   every animating node back to the origin.) */
 .mm-svg .mm-node {
   opacity: 0;
-  animation: mmNodeIn 520ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
-  transform-box: fill-box;
-  transform-origin: center;
-  transition: transform 220ms ease, filter 220ms ease;
+  animation: mmNodeIn 450ms ease-out forwards;
+  transition: filter 200ms ease;
 }
 .mm-svg .mm-node:hover {
-  transform: scale(1.06);
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.12));
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.18));
 }
 .mm-svg .mm-edge {
-  stroke-dasharray: 1000;
-  stroke-dashoffset: 1000;
-  animation: mmEdgeIn 760ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  stroke-dasharray: 1200;
+  stroke-dashoffset: 1200;
+  animation: mmEdgeIn 760ms ease-out forwards;
 }
 .mm-svg .mm-halo {
-  transform-origin: center;
-  transform-box: fill-box;
   animation: mmPulse 3.4s ease-in-out infinite;
 }
 @keyframes mmNodeIn {
-  0% {
-    opacity: 0;
-    transform: scale(0.6);
-  }
-  100% {
+  to {
     opacity: 1;
-    transform: scale(1);
   }
 }
 @keyframes mmEdgeIn {
   0% {
-    stroke-dashoffset: 1000;
+    stroke-dashoffset: 1200;
     opacity: 0;
   }
   20% {
@@ -338,11 +331,9 @@ body {
 @keyframes mmPulse {
   0%,
   100% {
-    transform: scale(1);
     opacity: 0.08;
   }
   50% {
-    transform: scale(1.08);
-    opacity: 0.16;
+    opacity: 0.18;
   }
 }

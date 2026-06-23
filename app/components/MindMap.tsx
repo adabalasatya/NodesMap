@@ -266,12 +266,7 @@ function FolderNode({
     <g
       className="mm-node cursor-pointer"
       transform={`translate(${node.x} ${node.y})`}
-      style={{
-        // Animate from a stable, in-place state — let the group's CSS run.
-        animationDelay: `${delay}ms`,
-        transformOrigin: `${node.x}px ${node.y}px`,
-        transformBox: "fill-box",
-      }}
+      style={{ animationDelay: `${delay}ms` }}
       onClick={() => onOpen(node.folder!.id)}
     >
       {isRoot && (

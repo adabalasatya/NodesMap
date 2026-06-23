@@ -5,50 +5,51 @@ import {
   selectOverallStats,
   useStore,
 } from "../lib/store";
-import { ChevronLeftIcon, FlameIcon } from "./icons";
+import { FlameIcon } from "./icons";
 import type { Folder } from "../lib/types";
 
 export default function ProgressView() {
   const { state, dispatch } = useStore();
-  const stats = selectOverallStats(state);
-  const rootFolders = state.folders.filter((f) => !f.parentId);
 
-  const goBack = () => {
-    if (state.currentFolderId) {
-      dispatch({
-        type: "SET_VIEW",
-        payload: {
-          view: "folder",
-          folderId: state.currentFolderId,
-          fileId: null,
-        },
-      });
-    } else {
-      dispatch({
-        type: "SET_VIEW",
-        payload: { view: "dashboard", folderId: null, fileId: null },
-      });
-    }
-  };
+  const currentFolder = state.currentFolderId
+    ? state.folders.find((f) => f.id === state.currentFolderId) ?? null
+    : null;
+
+  // Scope: if a folder is selected, show only that folder's subtree. If
+  // there is no folder context, show all root folders combined.
+  const scopeFolders = currentFolder
+    ? state.folders.filter((f) => f.parentId === currentFolder.id)
+    : state.folders.filter((f) => !f.parentId);
+
+  const overall = currentFolder
+    ? selectFolderProgressDeep(state, currentFolder.id)
+    : (() => {
+        const s = selectOverallStats(state);
+        return { done: s.done, total: s.total, pct: s.pct };
+      })();
+
+  const remaining = Math.max(0, overall.total - overall.done);
+  const foldersDone = scopeFolders.filter((f) => {
+    const p = selectFolderProgressDeep(state, f.id);
+    return p.total > 0 && p.done === p.total;
+  }).length;
+
+  const subtitle = currentFolder
+    ? `${overall.done} of ${overall.total} files in ${currentFolder.name}`
+    : `${overall.done} of ${overall.total} files across ${scopeFolders.length} folder${
+        scopeFolders.length === 1 ? "" : "s"
+      }`;
+
+  const subListLabel = currentFolder ? "Sub-folders" : "By folder";
 
   return (
-    <div className="p-6 fade-in max-w-3xl mx-auto">
-      <div className="mb-4">
-        <button
-          onClick={goBack}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--border)] hover:bg-[var(--surface-2)] text-sm transition"
-        >
-          <ChevronLeftIcon size={14} /> Back
-        </button>
-      </div>
-
+    <div className="p-6 fade-in">
       <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8 shadow-sm">
         <header className="flex items-start justify-between gap-4 mb-7">
           <div className="min-w-0">
             <h1 className="text-3xl font-bold tracking-tight">Progress</h1>
-            <p className="text-sm text-[var(--muted)] mt-1.5">
-              {stats.done} of {stats.total} files across {rootFolders.length}{" "}
-              folder{rootFolders.length === 1 ? "" : "s"}
+            <p className="text-sm text-[var(--muted)] mt-1.5 truncate">
+              {subtitle}
             </p>
           </div>
           <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--surface-2)] text-sm text-[var(--muted)] shrink-0">
@@ -61,7 +62,7 @@ export default function ProgressView() {
         <section className="mb-7">
           <div className="flex items-end justify-between mb-3">
             <div className="text-6xl font-bold tabular-nums leading-none">
-              {stats.pct}%
+              {overall.pct}%
             </div>
             <div className="text-sm text-[var(--muted)] pb-1">
               overall completion
@@ -71,7 +72,7 @@ export default function ProgressView() {
             <div
               className="h-full rounded-full transition-[width] duration-300"
               style={{
-                width: `${stats.pct}%`,
+                width: `${overall.pct}%`,
                 background: "var(--foreground)",
               }}
             />
@@ -79,22 +80,24 @@ export default function ProgressView() {
         </section>
 
         <section className="grid grid-cols-3 gap-3 mb-8">
-          <StatCard value={stats.done} label="Files completed" />
-          <StatCard value={stats.remaining} label="Remaining" />
-          <StatCard value={stats.foldersCompleted} label="Folders done" />
+          <StatCard value={overall.done} label="Files completed" />
+          <StatCard value={remaining} label="Remaining" />
+          <StatCard value={foldersDone} label="Folders done" />
         </section>
 
         <section>
           <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--muted)] mb-3">
-            By folder
+            {subListLabel}
           </div>
-          {rootFolders.length === 0 && (
+          {scopeFolders.length === 0 && (
             <div className="text-sm text-[var(--muted)] py-6 text-center">
-              No folders yet. Create one from the sidebar.
+              {currentFolder
+                ? "No sub-folders in this folder yet."
+                : "No folders yet. Create one from the sidebar."}
             </div>
           )}
           <div className="flex flex-col gap-1">
-            {rootFolders.map((folder, i) => {
+            {scopeFolders.map((folder, i) => {
               const p = selectFolderProgressDeep(state, folder.id);
               const complete = p.total > 0 && p.done === p.total;
               return (
@@ -174,7 +177,7 @@ function FolderRow({
         aria-hidden
       />
       <span
-        className={`text-sm font-medium min-w-[140px] max-w-[200px] truncate ${
+        className={`text-sm font-medium min-w-[160px] max-w-[260px] truncate ${
           complete ? "line-through text-[var(--muted)]" : ""
         }`}
       >
@@ -188,9 +191,7 @@ function FolderRow({
           className="h-full rounded-full transition-[width] duration-300"
           style={{
             width: `${pct}%`,
-            background: complete
-              ? "var(--muted)"
-              : "var(--foreground)",
+            background: complete ? "var(--muted)" : "var(--foreground)",
           }}
         />
       </div>

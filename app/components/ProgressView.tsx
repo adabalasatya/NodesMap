@@ -1,22 +1,42 @@
 "use client";
 
+import { useState } from "react";
 import {
   selectFolderProgressDeep,
   selectOverallStats,
   useStore,
 } from "../lib/store";
-import { FlameIcon } from "./icons";
-import type { Folder } from "../lib/types";
+import {
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  FileIcon,
+  FlameIcon,
+} from "./icons";
+import type { AppState } from "../lib/store";
+import type { Folder, NoteFile } from "../lib/types";
 
 export default function ProgressView() {
   const { state, dispatch } = useStore();
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  const currentFolder = state.currentFolderId
-    ? state.folders.find((f) => f.id === state.currentFolderId) ?? null
-    : null;
+  // Always report for the topmost ancestor of the currently-open folder.
+  // Opening Progress from Kotlin or Basics should still show Android.
+  const rootAncestor = (() => {
+    if (!state.currentFolderId) return null;
+    let cur = state.folders.find((f) => f.id === state.currentFolderId);
+    const seen = new Set<string>();
+    while (cur?.parentId && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      const next = state.folders.find((x) => x.id === cur!.parentId);
+      if (!next) break;
+      cur = next;
+    }
+    return cur ?? null;
+  })();
 
-  // Scope: if a folder is selected, show only that folder's subtree. If
-  // there is no folder context, show all root folders combined.
+  const currentFolder = rootAncestor;
+
   const scopeFolders = currentFolder
     ? state.folders.filter((f) => f.parentId === currentFolder.id)
     : state.folders.filter((f) => !f.parentId);
@@ -42,8 +62,50 @@ export default function ProgressView() {
 
   const subListLabel = currentFolder ? "Sub-folders" : "By folder";
 
+  const goBack = () => {
+    if (state.currentFolderId) {
+      dispatch({
+        type: "SET_VIEW",
+        payload: {
+          view: "folder",
+          folderId: state.currentFolderId,
+          fileId: null,
+        },
+      });
+    } else {
+      dispatch({
+        type: "SET_VIEW",
+        payload: { view: "dashboard", folderId: null, fileId: null },
+      });
+    }
+  };
+
+  const toggle = (id: string) =>
+    setExpanded((s) => ({ ...s, [id]: !s[id] }));
+
+  const openFolder = (id: string) =>
+    dispatch({
+      type: "SET_VIEW",
+      payload: { view: "folder", folderId: id, fileId: null },
+    });
+
+  const openFile = (folderId: string, fileId: string) =>
+    dispatch({
+      type: "SET_VIEW",
+      payload: { view: "editor", folderId, fileId },
+    });
+
   return (
     <div className="p-6 fade-in">
+      <div className="mb-4">
+        <button
+          onClick={goBack}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--border)] hover:bg-[var(--surface-2)] text-sm transition"
+        >
+          <ChevronLeftIcon size={14} /> Back
+        </button>
+      </div>
+
       <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8 shadow-sm">
         <header className="flex items-start justify-between gap-4 mb-7">
           <div className="min-w-0">
@@ -96,28 +158,20 @@ export default function ProgressView() {
                 : "No folders yet. Create one from the sidebar."}
             </div>
           )}
-          <div className="flex flex-col gap-1">
-            {scopeFolders.map((folder, i) => {
-              const p = selectFolderProgressDeep(state, folder.id);
-              const complete = p.total > 0 && p.done === p.total;
-              return (
-                <FolderRow
-                  key={folder.id}
-                  index={i + 1}
-                  folder={folder}
-                  done={p.done}
-                  total={p.total}
-                  pct={p.pct}
-                  complete={complete}
-                  onOpen={() =>
-                    dispatch({
-                      type: "SET_VIEW",
-                      payload: { view: "folder", folderId: folder.id },
-                    })
-                  }
-                />
-              );
-            })}
+          <div className="flex flex-col">
+            {scopeFolders.map((folder, i) => (
+              <FolderTreeRow
+                key={folder.id}
+                folder={folder}
+                state={state}
+                depth={0}
+                index={i + 1}
+                expanded={expanded}
+                toggle={toggle}
+                openFolder={openFolder}
+                openFile={openFile}
+              />
+            ))}
           </div>
         </section>
       </div>
@@ -142,64 +196,155 @@ function StatCard({
   );
 }
 
-function FolderRow({
-  index,
+function FolderTreeRow({
   folder,
-  done,
-  total,
-  pct,
-  complete,
+  state,
+  depth,
+  index,
+  expanded,
+  toggle,
+  openFolder,
+  openFile,
+}: {
+  folder: Folder;
+  state: AppState;
+  depth: number;
+  index: number;
+  expanded: Record<string, boolean>;
+  toggle: (id: string) => void;
+  openFolder: (id: string) => void;
+  openFile: (folderId: string, fileId: string) => void;
+}) {
+  const childFolders = state.folders.filter((f) => f.parentId === folder.id);
+  const childFiles = state.files.filter((f) => f.folderId === folder.id);
+  const hasChildren = childFolders.length > 0 || childFiles.length > 0;
+  const isOpen = !!expanded[folder.id];
+  const p = selectFolderProgressDeep(state, folder.id);
+  const complete = p.total > 0 && p.done === p.total;
+
+  const indent = depth * 18;
+
+  return (
+    <>
+      <div
+        className={`group flex items-center gap-2 rounded-xl py-3 pr-4 text-left transition ${
+          complete ? "bg-[var(--surface-2)]" : "hover:bg-[var(--surface-2)]"
+        }`}
+        style={{ paddingLeft: 16 + indent }}
+      >
+        <button
+          onClick={() => hasChildren && toggle(folder.id)}
+          className={`shrink-0 grid place-items-center size-5 rounded transition ${
+            hasChildren
+              ? "text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)]"
+              : "opacity-0 pointer-events-none"
+          }`}
+          aria-label={isOpen ? "Collapse" : "Expand"}
+        >
+          {isOpen ? (
+            <ChevronDownIcon size={12} />
+          ) : (
+            <ChevronRightIcon size={12} />
+          )}
+        </button>
+        <span
+          className={`size-2.5 rounded-full shrink-0 ${
+            complete
+              ? "bg-[var(--foreground)]"
+              : "border border-[var(--muted)]/60"
+          }`}
+          aria-hidden
+        />
+        <button
+          onClick={() => openFolder(folder.id)}
+          className={`text-sm font-medium min-w-[160px] max-w-[260px] truncate text-left ${
+            complete ? "line-through text-[var(--muted)]" : ""
+          }`}
+        >
+          <span className="text-[var(--muted)] tabular-nums">
+            {String(index).padStart(2, "0")}.
+          </span>{" "}
+          {folder.name}
+        </button>
+        <div className="flex-1 h-1 rounded-full bg-[var(--surface-2)] overflow-hidden">
+          <div
+            className="h-full rounded-full transition-[width] duration-300"
+            style={{
+              width: `${p.pct}%`,
+              background: complete ? "var(--muted)" : "var(--foreground)",
+            }}
+          />
+        </div>
+        <span className="text-sm font-semibold tabular-nums w-12 text-right shrink-0">
+          {p.pct}%
+        </span>
+        <span className="text-xs text-[var(--muted)] tabular-nums w-10 text-right shrink-0">
+          {p.done}/{p.total}
+        </span>
+      </div>
+
+      {isOpen && (
+        <>
+          {childFolders.map((sub, i) => (
+            <FolderTreeRow
+              key={sub.id}
+              folder={sub}
+              state={state}
+              depth={depth + 1}
+              index={i + 1}
+              expanded={expanded}
+              toggle={toggle}
+              openFolder={openFolder}
+              openFile={openFile}
+            />
+          ))}
+          {childFiles.map((file) => (
+            <FileTreeRow
+              key={file.id}
+              file={file}
+              depth={depth + 1}
+              onOpen={() => openFile(folder.id, file.id)}
+            />
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
+function FileTreeRow({
+  file,
+  depth,
   onOpen,
 }: {
-  index: number;
-  folder: Folder;
-  done: number;
-  total: number;
-  pct: number;
-  complete: boolean;
+  file: NoteFile;
+  depth: number;
   onOpen: () => void;
 }) {
+  const indent = depth * 18;
   return (
     <button
       onClick={onOpen}
-      className={`group flex items-center gap-3 rounded-xl px-4 py-3 text-left transition ${
-        complete
-          ? "bg-[var(--surface-2)]"
-          : "hover:bg-[var(--surface-2)]"
-      }`}
+      className="flex items-center gap-2 rounded-xl py-2 pr-4 text-left hover:bg-[var(--surface-2)] transition"
+      style={{ paddingLeft: 16 + indent + 24 }}
     >
-      <span
-        className={`size-2.5 rounded-full shrink-0 ${
-          complete
-            ? "bg-[var(--foreground)]"
-            : "border border-[var(--muted)]/60"
+      <FileIcon
+        size={12}
+        className={`shrink-0 ${
+          file.isCompleted
+            ? "text-[var(--foreground)]"
+            : "text-[var(--muted)]"
         }`}
-        aria-hidden
       />
       <span
-        className={`text-sm font-medium min-w-[160px] max-w-[260px] truncate ${
-          complete ? "line-through text-[var(--muted)]" : ""
+        className={`text-sm truncate flex-1 ${
+          file.isCompleted ? "line-through text-[var(--muted)]" : ""
         }`}
       >
-        <span className="text-[var(--muted)] tabular-nums">
-          {String(index).padStart(2, "0")}.
-        </span>{" "}
-        {folder.name}
+        {file.title.replace(/\.md$/i, "")}
       </span>
-      <div className="flex-1 h-1 rounded-full bg-[var(--surface-2)] overflow-hidden">
-        <div
-          className="h-full rounded-full transition-[width] duration-300"
-          style={{
-            width: `${pct}%`,
-            background: complete ? "var(--muted)" : "var(--foreground)",
-          }}
-        />
-      </div>
-      <span className="text-sm font-semibold tabular-nums w-12 text-right shrink-0">
-        {pct}%
-      </span>
-      <span className="text-xs text-[var(--muted)] tabular-nums w-10 text-right shrink-0">
-        {done}/{total}
+      <span className="text-[11px] text-[var(--muted)] tabular-nums shrink-0">
+        {file.isCompleted ? "100%" : "0%"}
       </span>
     </button>
   );

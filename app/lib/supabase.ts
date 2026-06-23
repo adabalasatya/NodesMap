@@ -42,21 +42,44 @@ async function uid(): Promise<string | null> {
   return data.user?.id ?? null;
 }
 
+// `parent_id` was added later. If the column is missing in the deployed
+// schema, fall back so the app keeps working until the user runs the
+// migration in supabase-schema.sql.
+let parentIdSupported: boolean | null = null;
+function isMissingParentIdError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: string; message?: string };
+  if (e.code === "42703") return true;
+  return !!e.message && /parent_id/i.test(e.message);
+}
+
 export async function fetchFolders(): Promise<Folder[]> {
   const userId = await uid();
   if (!userId) return [];
+  const cols =
+    parentIdSupported === false
+      ? "id,name,color,created_at"
+      : "id,name,color,created_at,parent_id";
   const { data, error } = await getSupabase()
     .from("folders")
-    .select("id,name,color,created_at,parent_id")
+    .select(cols)
     .eq("user_id", userId)
     .order("created_at", { ascending: true });
-  if (error) throw error;
-  return (data ?? []).map((r) => ({
-    id: r.id as string,
-    name: r.name as string,
-    color: r.color as string,
-    createdAt: new Date(r.created_at as string).getTime(),
-    parentId: (r.parent_id as string | null) ?? null,
+  if (error) {
+    if (parentIdSupported !== false && isMissingParentIdError(error)) {
+      parentIdSupported = false;
+      return fetchFolders();
+    }
+    throw error;
+  }
+  if (parentIdSupported === null) parentIdSupported = true;
+  const rows = (data ?? []) as unknown as Record<string, unknown>[];
+  return rows.map((row) => ({
+    id: row.id as string,
+    name: row.name as string,
+    color: row.color as string,
+    createdAt: new Date(row.created_at as string).getTime(),
+    parentId: (row.parent_id as string | null | undefined) ?? null,
   }));
 }
 
@@ -82,15 +105,29 @@ export async function fetchFiles(): Promise<NoteFile[]> {
 export async function upsertFolder(folder: Folder) {
   const userId = await uid();
   if (!userId) return;
-  const { error } = await getSupabase().from("folders").upsert({
+  const base: Record<string, unknown> = {
     id: folder.id,
     user_id: userId,
     name: folder.name,
     color: folder.color,
-    parent_id: folder.parentId ?? null,
     created_at: new Date(folder.createdAt).toISOString(),
-  });
-  if (error) throw error;
+  };
+  const payload =
+    parentIdSupported === false
+      ? base
+      : { ...base, parent_id: folder.parentId ?? null };
+  const { error } = await getSupabase().from("folders").upsert(payload);
+  if (error) {
+    if (parentIdSupported !== false && isMissingParentIdError(error)) {
+      parentIdSupported = false;
+      const { error: retryError } = await getSupabase()
+        .from("folders")
+        .upsert(base);
+      if (retryError) throw retryError;
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function upsertFile(file: NoteFile) {

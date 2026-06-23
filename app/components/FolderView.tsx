@@ -9,6 +9,8 @@ import {
 import {
   CheckIcon,
   ChevronLeftIcon,
+  ChevronRightIcon,
+  FileIcon,
   FolderIcon,
   FolderPlusIcon,
   PlusIcon,
@@ -161,57 +163,63 @@ export default function FolderView() {
         </div>
       </div>
 
-      <div
-        className={
-          state.viewMode === "grid"
-            ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
-            : "flex flex-col gap-2"
-        }
-      >
-        {subFolders.map((sub) => {
-          const sp = selectFolderProgressDeep(state, sub.id);
-          return (
-            <div
-              key={sub.id}
-              onClick={() =>
-                dispatch({
-                  type: "SET_VIEW",
-                  payload: {
-                    view: "folder",
-                    folderId: sub.id,
-                    fileId: null,
-                  },
-                })
-              }
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setMenu({
-                  x: e.clientX,
-                  y: e.clientY,
-                  items: folderItemMenu(sub.id, sub.name, dispatch),
-                });
-              }}
-              className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] p-5 min-h-[140px] flex flex-col cursor-pointer transition"
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <FolderIcon size={20} style={{ color: sub.color }} />
-                <div className="font-semibold text-base flex-1">{sub.name}</div>
-              </div>
-              <div className="mt-auto">
-                <div className="text-xs text-[var(--muted)] mb-1.5 tabular-nums">
-                  {sp.done}/{sp.total} done
+      {subFolders.length > 0 && (
+        <div
+          className={
+            state.viewMode === "grid"
+              ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6"
+              : "flex flex-col gap-2 mb-6"
+          }
+        >
+          {subFolders.map((sub) => {
+            const sp = selectFolderProgressDeep(state, sub.id);
+            return (
+              <div
+                key={sub.id}
+                onClick={() =>
+                  dispatch({
+                    type: "SET_VIEW",
+                    payload: {
+                      view: "folder",
+                      folderId: sub.id,
+                      fileId: null,
+                    },
+                  })
+                }
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenu({
+                    x: e.clientX,
+                    y: e.clientY,
+                    items: folderItemMenu(sub.id, sub.name, dispatch),
+                  });
+                }}
+                className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] p-5 min-h-[140px] flex flex-col cursor-pointer transition"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <FolderIcon size={20} style={{ color: sub.color }} />
+                  <div className="font-semibold text-base flex-1">
+                    {sub.name}
+                  </div>
                 </div>
-                <div className="w-full h-1 rounded-full bg-[var(--surface-2)] overflow-hidden">
-                  <div
-                    className="h-full rounded-full"
-                    style={{ width: `${sp.pct}%`, background: sub.color }}
-                  />
+                <div className="mt-auto">
+                  <div className="text-xs text-[var(--muted)] mb-1.5 tabular-nums">
+                    {sp.done}/{sp.total} done
+                  </div>
+                  <div className="w-full h-1 rounded-full bg-[var(--surface-2)] overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{ width: `${sp.pct}%`, background: sub.color }}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+      )}
 
+      <div className="flex flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden divide-y divide-[var(--border)]">
         {files.map((file) => (
           <div
             key={file.id}
@@ -233,48 +241,47 @@ export default function FolderView() {
                 items: fileMenu(file.id, file.title, dispatch, file.isCompleted),
               });
             }}
-            className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] p-5 min-h-[140px] flex flex-col cursor-pointer transition"
+            className="group flex items-center gap-2.5 px-3 py-2 hover:bg-[var(--surface-2)] cursor-pointer transition"
           >
-            <div
-              className={`font-semibold text-base mb-2 flex-1 ${
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                dispatch({
+                  type: "TOGGLE_FILE_DONE",
+                  payload: { id: file.id },
+                });
+              }}
+              aria-label={
+                file.isCompleted ? "Mark not done" : "Mark as done"
+              }
+              className={`shrink-0 size-5 rounded-full border flex items-center justify-center transition ${
                 file.isCompleted
-                  ? "line-through text-[var(--muted)]"
-                  : ""
+                  ? "border-[var(--border)]"
+                  : "border-[var(--border)] hover:border-[var(--foreground)]/40"
+              }`}
+              style={file.isCompleted ? { color: folder.color } : undefined}
+            >
+              {file.isCompleted ? (
+                <CheckIcon size={12} />
+              ) : (
+                <span className="size-2.5" />
+              )}
+            </button>
+            <FileIcon size={13} className="shrink-0 text-[var(--muted)]" />
+            <span
+              className={`text-sm truncate flex-1 ${
+                file.isCompleted ? "line-through text-[var(--muted)]" : ""
               }`}
             >
               {file.title.replace(/\.md$/i, "")}
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="text-xs text-[var(--muted)]">.md</div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  dispatch({
-                    type: "TOGGLE_FILE_DONE",
-                    payload: { id: file.id },
-                  });
-                }}
-                aria-label={
-                  file.isCompleted ? "Mark not done" : "Mark as done"
-                }
-                className={`shrink-0 h-7 px-2 rounded-full border transition flex items-center justify-center ${
-                  file.isCompleted
-                    ? "bg-[var(--surface-2)] border-[var(--border)]"
-                    : "border-[var(--border)] hover:border-[var(--foreground)]/40"
-                }`}
-                style={
-                  file.isCompleted
-                    ? { color: folder.color }
-                    : undefined
-                }
-              >
-                {file.isCompleted ? (
-                  <CheckIcon size={14} />
-                ) : (
-                  <span className="size-3" />
-                )}
-              </button>
-            </div>
+            </span>
+            <span className="text-[10px] text-[var(--muted)] tabular-nums opacity-60">
+              .md
+            </span>
+            <ChevronRightIcon
+              size={12}
+              className="text-[var(--muted)] opacity-0 group-hover:opacity-100 transition"
+            />
           </div>
         ))}
 
@@ -284,12 +291,10 @@ export default function FolderView() {
               setCreating("file");
               setNewName("");
             }}
-            className="rounded-2xl border-2 border-dashed border-[var(--border)] p-5 min-h-[140px] grid place-items-center text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 transition"
+            className="flex items-center gap-2.5 px-3 py-2 text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition text-sm"
           >
-            <div className="flex flex-col items-center gap-2">
-              <PlusIcon size={20} />
-              <span className="text-sm">New file</span>
-            </div>
+            <PlusIcon size={14} />
+            <span>New file</span>
           </button>
         )}
       </div>

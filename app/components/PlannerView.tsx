@@ -7,6 +7,7 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  LinkIcon,
   PlusIcon,
   TrashIcon,
 } from "./icons";
@@ -51,10 +52,13 @@ export default function PlannerView() {
   const { state, dispatch } = useStore();
   const [selectedDate, setSelectedDate] = useState<string>(() => TODAY());
   const [stripStart, setStripStart] = useState<string>(() => {
-    // Start the strip on the Sunday of the current week so each "page" of
-    // the strip lines up cleanly with calendar weeks.
+    // Start the strip on the MONDAY of the current week so each "page" of
+    // the strip lines up cleanly with ISO-style calendar weeks
+    // (Mon → Sun).
     const t = new Date();
-    t.setDate(t.getDate() - t.getDay());
+    const dow = t.getDay(); // 0=Sun, 1=Mon, … 6=Sat
+    const offset = dow === 0 ? 6 : dow - 1;
+    t.setDate(t.getDate() - offset);
     return ymd(t);
   });
   const [adding, setAdding] = useState(false);
@@ -376,26 +380,9 @@ function TaskRow({
   onToggle: () => void;
   onDelete: () => void;
 }) {
-  const { state } = useStore();
-  const linkedFile = task.linkedFileId
-    ? state.files.find((f) => f.id === task.linkedFileId) ?? null
-    : null;
-  const linkedFolder = task.linkedFolderId
-    ? state.folders.find((f) => f.id === task.linkedFolderId) ?? null
-    : null;
-  const linkedFolderForFile = linkedFile
-    ? state.folders.find((f) => f.id === linkedFile.folderId)
-    : null;
-  const linkPath = linkedFile
-    ? `${linkedFolderForFile?.name ?? ""}${
-        linkedFolderForFile ? " / " : ""
-      }${linkedFile.title.replace(/\.md$/i, "")}`
-    : linkedFolder
-    ? linkedFolder.name
-    : null;
-
-  const autoCompleted =
-    done && task.autoCompletedDates.includes(date);
+  const { state, dispatch } = useStore();
+  const isLinked = !!(task.linkedFileId || task.linkedFolderId);
+  const autoCompleted = done && task.autoCompletedDates.includes(date);
 
   return (
     <div
@@ -439,11 +426,16 @@ function TaskRow({
               Auto-completed
             </span>
           )}
-          {linkPath && (
-            <span className="truncate">
-              <span className="text-[var(--muted)]/70">·</span>{" "}
-              {linkPath}
-            </span>
+          {isLinked && (
+            <LinkedBadge
+              task={task}
+              onChange={(linkedFileId, linkedFolderId) =>
+                dispatch({
+                  type: "UPDATE_TASK",
+                  payload: { id: task.id, linkedFileId, linkedFolderId },
+                })
+              }
+            />
           )}
         </div>
       </div>
@@ -455,6 +447,163 @@ function TaskRow({
       >
         <TrashIcon size={13} />
       </button>
+    </div>
+  );
+}
+
+/* ----------------------- Linked badge + popup picker ----------------------- */
+
+function LinkedBadge({
+  task,
+  onChange,
+}: {
+  task: Task;
+  onChange: (
+    linkedFileId: string | null,
+    linkedFolderId: string | null
+  ) => void;
+}) {
+  const { state } = useStore();
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      if (
+        wrapperRef.current &&
+        !wrapperRef.current.contains(e.target as Node)
+      )
+        setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  const folderPath = (folderId: string): string => {
+    const parts: string[] = [];
+    let cur = state.folders.find((f) => f.id === folderId);
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      parts.unshift(cur.name);
+      cur = cur.parentId
+        ? state.folders.find((x) => x.id === cur!.parentId)
+        : undefined;
+    }
+    return parts.join(" / ");
+  };
+
+  const linkedFile = task.linkedFileId
+    ? state.files.find((f) => f.id === task.linkedFileId)
+    : null;
+  const linkedFolder = task.linkedFolderId
+    ? state.folders.find((f) => f.id === task.linkedFolderId)
+    : null;
+  const tooltip = linkedFile
+    ? `${folderPath(linkedFile.folderId)} / ${linkedFile.title.replace(/\.md$/i, "")}`
+    : linkedFolder
+    ? folderPath(linkedFolder.id)
+    : "Linked";
+
+  const matches = (label: string) =>
+    !search || label.toLowerCase().includes(search.toLowerCase());
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={tooltip}
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--surface-2)] text-[var(--foreground)] text-[10px] font-medium hover:bg-[var(--surface-3,var(--surface-2))] transition"
+      >
+        <LinkIcon size={10} />
+        Linked
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 w-72 max-h-72 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-lg z-30 p-1.5">
+          <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--muted)]">
+            Change link
+          </div>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search folders / files…"
+            className="w-full bg-[var(--surface-2)] rounded-lg px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-[var(--accent)] mb-1"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              onChange(null, null);
+              setOpen(false);
+            }}
+            className="w-full text-left px-2.5 py-1.5 rounded-md text-xs text-[var(--muted)] hover:bg-[var(--surface-2)] transition"
+          >
+            Remove link
+          </button>
+          {state.folders.length > 0 && (
+            <>
+              <div className="h-px bg-[var(--border)] my-1" />
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
+                Folders
+              </div>
+              {state.folders
+                .filter((f) => matches(folderPath(f.id)))
+                .map((f) => (
+                  <button
+                    key={`folder-${f.id}`}
+                    type="button"
+                    onClick={() => {
+                      onChange(null, f.id);
+                      setOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs hover:bg-[var(--surface-2)] transition truncate ${
+                      task.linkedFolderId === f.id ? "font-semibold" : ""
+                    }`}
+                  >
+                    {folderPath(f.id)}
+                  </button>
+                ))}
+            </>
+          )}
+          {state.files.length > 0 && (
+            <>
+              <div className="h-px bg-[var(--border)] my-1" />
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
+                Files
+              </div>
+              {state.files
+                .filter((f) =>
+                  matches(`${f.title} ${folderPath(f.folderId)}`)
+                )
+                .map((f) => (
+                  <button
+                    key={`file-${f.id}`}
+                    type="button"
+                    onClick={() => {
+                      onChange(f.id, null);
+                      setOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs hover:bg-[var(--surface-2)] transition truncate ${
+                      task.linkedFileId === f.id ? "font-semibold" : ""
+                    }`}
+                  >
+                    {folderPath(f.folderId)} /{" "}
+                    {f.title.replace(/\.md$/i, "")}
+                  </button>
+                ))}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

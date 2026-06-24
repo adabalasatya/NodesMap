@@ -129,6 +129,12 @@ export const ChartIcon = (p: Props) => (
     <path d="M7 15l4-4 4 4 5-7" />
   </svg>
 );
+export const LinkIcon = (p: Props) => (
+  <svg {...base(p)}>
+    <path d="M10 14a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.41 1.41" />
+    <path d="M14 10a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.41-1.41" />
+  </svg>
+);
 export const CalendarIcon = (p: Props) => (
   <svg {...base(p)}>
     <rect x="3" y="4" width="18" height="17" rx="2" />

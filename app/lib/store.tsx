@@ -119,7 +119,18 @@ export type Action =
       };
     }
   | { type: "DELETE_TASK"; payload: { id: string } }
-  | { type: "TOGGLE_TASK_DONE"; payload: { id: string; date: string } };
+  | { type: "TOGGLE_TASK_DONE"; payload: { id: string; date: string } }
+  | {
+      type: "UPDATE_TASK";
+      payload: {
+        id: string;
+        title?: string;
+        time?: string | undefined;
+        repeat?: RepeatKind;
+        linkedFileId?: string | null;
+        linkedFolderId?: string | null;
+      };
+    };
 
 function errorMessage(e: unknown): string {
   if (typeof e === "string") return e;
@@ -438,6 +449,16 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         tasks: state.tasks.filter((t) => t.id !== action.payload.id),
       };
+
+    case "UPDATE_TASK": {
+      const { id, ...patch } = action.payload;
+      const tasks = state.tasks.map((t) =>
+        t.id === id ? { ...t, ...patch, updatedAt: Date.now() } : t
+      );
+      // Re-evaluate auto-completion since the link may have just changed.
+      const refreshed = applyAutoCompletion(tasks, state.folders, state.files);
+      return { ...state, tasks: refreshed };
+    }
 
     case "TOGGLE_TASK_DONE": {
       const { id, date } = action.payload;

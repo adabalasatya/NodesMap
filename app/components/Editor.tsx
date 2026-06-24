@@ -308,11 +308,32 @@ export default function Editor() {
   const toggleItalic = useCallback(() => exec("italic"), [exec]);
 
   /* --- Strike — REQUIRES selection. --- */
+  /* Wrap the current selection in <s>…</s> directly (no execCommand) so
+     the browser doesn't keep "strike mode" armed for the next typed
+     characters. Strike is a one-shot operation on the selection only. */
   const toggleStrike = useCallback(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    el.focus();
     const sel = window.getSelection();
-    if (!sel || sel.isCollapsed) return;
-    exec("strikeThrough");
-  }, [exec]);
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    const wrapper = document.createElement("s");
+    try {
+      wrapper.appendChild(range.extractContents());
+      range.insertNode(wrapper);
+    } catch {
+      return;
+    }
+    // Park the caret OUTSIDE the wrapper so typing resumes un-struck.
+    const after = document.createRange();
+    after.setStartAfter(wrapper);
+    after.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(after);
+    flush();
+    updateFormats();
+  }, [flush, updateFormats]);
 
   /* --- Headings — apply to next characters: if the current block has text,
          start a NEW heading block after it and place the caret inside. --- */
@@ -347,6 +368,11 @@ export default function Editor() {
     [exec]
   );
 
+  /* Font ± behaviour:
+       - With a selection → wrap the selected text in <span style="font-size: N">.
+       - With NO selection → insert an empty sized span (containing a
+         zero-width space) and place the caret inside it, so the very next
+         typed character inherits the new size. */
   const adjustFont = useCallback(
     (direction: 1 | -1) => {
       const el = editorRef.current;
@@ -355,28 +381,7 @@ export default function Editor() {
       const sel = window.getSelection();
       if (!sel || sel.rangeCount === 0) return;
       const range = sel.getRangeAt(0);
-      if (range.collapsed) {
-        // Expand to the current word so the change is visible.
-        const node = range.startContainer;
-        if (node.nodeType === Node.TEXT_NODE) {
-          const text = node.textContent ?? "";
-          const offset = range.startOffset;
-          let start = offset;
-          let end = offset;
-          while (start > 0 && /\S/.test(text[start - 1])) start--;
-          while (end < text.length && /\S/.test(text[end])) end++;
-          if (end > start) {
-            range.setStart(node, start);
-            range.setEnd(node, end);
-            sel.removeAllRanges();
-            sel.addRange(range);
-          } else {
-            return;
-          }
-        } else {
-          return;
-        }
-      }
+
       const anchor =
         range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
           ? (range.commonAncestorContainer as Element)
@@ -392,8 +397,26 @@ export default function Editor() {
         direction === 1
           ? FONT_STEPS[Math.min(FONT_STEPS.length - 1, idx + 1)]
           : FONT_STEPS[Math.max(0, idx - 1)];
+
       const span = document.createElement("span");
       span.style.fontSize = `${next}px`;
+
+      if (range.collapsed) {
+        // No selection — drop a sized empty span at the caret with a
+        // zero-width space so the browser keeps the caret inside it.
+        const zws = document.createTextNode("​");
+        span.appendChild(zws);
+        range.insertNode(span);
+        const r = document.createRange();
+        r.setStart(zws, 1);
+        r.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(r);
+        flush();
+        updateFormats();
+        return;
+      }
+
       try {
         const contents = range.extractContents();
         span.appendChild(contents);
@@ -411,34 +434,65 @@ export default function Editor() {
     [flush, updateFormats]
   );
 
-  /* --- Code block — insert <pre><code></code></pre><p><br></p> and put
-         caret inside the <code>. The trailing paragraph stays clickable
-         so the user can move out of the code box. --- */
+  /* --- Code block — insert <pre><code># program</code></pre><p><br></p>
+         so the box visibly says "this is code". The caret lands at the
+         END of the placeholder so the user can keep typing right away.
+         Clicking on the trailing paragraph (or any text outside) moves
+         the caret out of the box, since it's just normal DOM. --- */
   const insertCodeBlock = useCallback(() => {
     const el = editorRef.current;
     if (!el) return;
     el.focus();
-    const html = `<pre><code data-caret="1"></code></pre><p><br></p>`;
+    const html = `<pre><code data-caret="1"># program</code></pre><p><br></p>`;
     document.execCommand("insertHTML", false, html);
     const caret = el.querySelector('code[data-caret="1"]');
     if (caret instanceof HTMLElement) {
       caret.removeAttribute("data-caret");
-      placeCaretIn(caret);
+      const textNode = caret.firstChild;
+      const range = document.createRange();
+      if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+        range.setStart(textNode, textNode.textContent?.length ?? 0);
+      } else {
+        range.setStart(caret, caret.childNodes.length);
+      }
+      range.collapse(true);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
     }
     flush();
     updateFormats();
   }, [flush, updateFormats]);
 
-  /* --- Lists — checklist, radio, bullet, numbered. New list with the
-         marker class so CSS ::before renders the box/dot, and Enter
-         behavior is handled by the browser. --- */
+  /* --- Lists — checkbox / radio / bullet / numbered.
+         If the caret is already inside a list, CONVERT the existing list
+         to the new type in place (preserving items + caret). Otherwise
+         insert a fresh list. --- */
   const insertList = useCallback(
     (kind: "cb" | "rb" | "ul" | "ol") => {
       const el = editorRef.current;
       if (!el) return;
       el.focus();
+      const sel = window.getSelection();
+      const node = sel && sel.rangeCount > 0 ? sel.anchorNode : null;
+      const startEl = node ? elNodeFromSelection(node) : null;
+      const currentList =
+        startEl && el.contains(startEl)
+          ? (startEl.closest("ul, ol") as HTMLElement | null)
+          : null;
+
+      if (currentList) {
+        convertListInPlace(currentList, kind);
+        flush();
+        updateFormats();
+        return;
+      }
+
       if (kind === "ul") {
         exec("insertUnorderedList");
+        // execCommand makes a plain <ul>; strip any inherited class.
+        const made = el.querySelector("ul:not([class])");
+        if (made instanceof HTMLElement) made.className = "";
         return;
       }
       if (kind === "ol") {
@@ -677,6 +731,33 @@ function placeCaretIn(el: HTMLElement) {
   sel?.addRange(r);
 }
 
+/**
+ * Convert an existing list (ul / ul.cb-list / ul.rb-list / ol) to a new
+ * kind, preserving its <li> children and the caret position. If the new
+ * kind has a different tag, swap the tag; otherwise just toggle the class.
+ */
+function convertListInPlace(
+  list: HTMLElement,
+  kind: "cb" | "rb" | "ul" | "ol"
+) {
+  const newTag = kind === "ol" ? "ol" : "ul";
+  const newClass =
+    kind === "cb" ? "cb-list" : kind === "rb" ? "rb-list" : "";
+  const currentTag = list.tagName.toLowerCase();
+
+  if (currentTag === newTag) {
+    list.className = newClass;
+    return;
+  }
+  const parent = list.parentNode;
+  if (!parent) return;
+  const replacement = document.createElement(newTag);
+  if (newClass) replacement.className = newClass;
+  // Move children over (preserves text nodes / caret refs).
+  while (list.firstChild) replacement.appendChild(list.firstChild);
+  parent.replaceChild(replacement, list);
+}
+
 function currentBlock(node: Node | null, root: HTMLElement): HTMLElement | null {
   if (!node) return null;
   let cur: Node | null =
@@ -839,6 +920,7 @@ function FormatToolbar({
         </TbButton>
       </TbGroup>
 
+      {/* Checkbox + Radio share one group */}
       <TbGroup>
         <TbButton
           title="Checklist"
@@ -848,18 +930,22 @@ function FormatToolbar({
           <ListGlyph kind="check" />
         </TbButton>
         <TbButton
-          title="Bullet list"
-          active={formats.ul && !formats.cb && !formats.rb}
-          onClick={() => insertList("ul")}
-        >
-          <ListGlyph kind="bullet" />
-        </TbButton>
-        <TbButton
           title="Radio list"
           active={formats.rb}
           onClick={() => insertList("rb")}
         >
           <ListGlyph kind="radio" />
+        </TbButton>
+      </TbGroup>
+
+      {/* Bullet + Numbered share one group */}
+      <TbGroup>
+        <TbButton
+          title="Bullet list"
+          active={formats.ul && !formats.cb && !formats.rb}
+          onClick={() => insertList("ul")}
+        >
+          <ListGlyph kind="bullet" />
         </TbButton>
         <TbButton
           title="Numbered list"

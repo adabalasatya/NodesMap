@@ -83,12 +83,6 @@ export default function ProgressView() {
   const toggle = (id: string) =>
     setExpanded((s) => ({ ...s, [id]: !s[id] }));
 
-  const openFolder = (id: string) =>
-    dispatch({
-      type: "SET_VIEW",
-      payload: { view: "folder", folderId: id, fileId: null },
-    });
-
   const openFile = (folderId: string, fileId: string) =>
     dispatch({
       type: "SET_VIEW",
@@ -168,7 +162,6 @@ export default function ProgressView() {
                 index={i + 1}
                 expanded={expanded}
                 toggle={toggle}
-                openFolder={openFolder}
                 openFile={openFile}
               />
             ))}
@@ -203,7 +196,6 @@ function FolderTreeRow({
   index,
   expanded,
   toggle,
-  openFolder,
   openFile,
 }: {
   folder: Folder;
@@ -212,7 +204,6 @@ function FolderTreeRow({
   index: number;
   expanded: Record<string, boolean>;
   toggle: (id: string) => void;
-  openFolder: (id: string) => void;
   openFile: (folderId: string, fileId: string) => void;
 }) {
   const childFolders = state.folders.filter((f) => f.parentId === folder.id);
@@ -226,27 +217,29 @@ function FolderTreeRow({
 
   return (
     <>
-      <div
-        className={`group flex items-center gap-2 rounded-xl py-3 pr-4 text-left transition ${
+      <button
+        type="button"
+        onClick={() => hasChildren && toggle(folder.id)}
+        className={`group flex items-center gap-2 rounded-xl py-3 pr-4 text-left transition w-full ${
           complete ? "bg-[var(--surface-2)]" : "hover:bg-[var(--surface-2)]"
-        }`}
+        } ${hasChildren ? "cursor-pointer" : "cursor-default"}`}
         style={{ paddingLeft: 16 + indent }}
+        aria-expanded={isOpen}
       >
-        <button
-          onClick={() => hasChildren && toggle(folder.id)}
+        <span
           className={`shrink-0 grid place-items-center size-5 rounded transition ${
             hasChildren
-              ? "text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)]"
-              : "opacity-0 pointer-events-none"
+              ? "text-[var(--muted)] group-hover:text-[var(--foreground)]"
+              : "opacity-0"
           }`}
-          aria-label={isOpen ? "Collapse" : "Expand"}
+          aria-hidden
         >
           {isOpen ? (
             <ChevronDownIcon size={12} />
           ) : (
             <ChevronRightIcon size={12} />
           )}
-        </button>
+        </span>
         <span
           className={`size-2.5 rounded-full shrink-0 ${
             complete
@@ -255,9 +248,8 @@ function FolderTreeRow({
           }`}
           aria-hidden
         />
-        <button
-          onClick={() => openFolder(folder.id)}
-          className={`text-sm font-medium min-w-[160px] max-w-[260px] truncate text-left ${
+        <span
+          className={`text-sm font-medium min-w-[160px] max-w-[260px] truncate ${
             complete ? "line-through text-[var(--muted)]" : ""
           }`}
         >
@@ -265,23 +257,23 @@ function FolderTreeRow({
             {String(index).padStart(2, "0")}.
           </span>{" "}
           {folder.name}
-        </button>
-        <div className="flex-1 h-1 rounded-full bg-[var(--surface-2)] overflow-hidden">
-          <div
-            className="h-full rounded-full transition-[width] duration-300"
+        </span>
+        <span className="flex-1 h-1 rounded-full bg-[var(--surface-2)] overflow-hidden">
+          <span
+            className="block h-full rounded-full transition-[width] duration-300"
             style={{
               width: `${p.pct}%`,
               background: complete ? "var(--muted)" : "var(--foreground)",
             }}
           />
-        </div>
+        </span>
         <span className="text-sm font-semibold tabular-nums w-12 text-right shrink-0">
           {p.pct}%
         </span>
         <span className="text-xs text-[var(--muted)] tabular-nums w-10 text-right shrink-0">
           {p.done}/{p.total}
         </span>
-      </div>
+      </button>
 
       {isOpen && (
         <>
@@ -294,7 +286,6 @@ function FolderTreeRow({
               index={i + 1}
               expanded={expanded}
               toggle={toggle}
-              openFolder={openFolder}
               openFile={openFile}
             />
           ))}

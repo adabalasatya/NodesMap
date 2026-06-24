@@ -297,6 +297,20 @@ body {
   animation: fadeIn 180ms ease-out;
 }
 
+@keyframes modalPop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.modal-pop {
+  animation: modalPop 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 /* Mind map animations — opacity / filter only so we never fight with the
    per-node SVG `transform="translate(x y)"` attribute that positions each
    node. (Using CSS `transform` would override the translate and collapse

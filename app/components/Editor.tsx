@@ -524,13 +524,23 @@ export default function Editor() {
       if (!el) return;
       el.focus();
       const sel = window.getSelection();
-      const node = sel && sel.rangeCount > 0 ? sel.anchorNode : null;
+      const node =
+        sel && sel.rangeCount > 0 ? sel.getRangeAt(0).startContainer : null;
       const startEl = node ? elNodeFromSelection(node) : null;
-      const currentList =
-        startEl && el.contains(startEl)
-          ? (startEl.closest("ul, ol") as HTMLElement | null)
-          : null;
+      // Find any list ancestor — also try via the focusNode in case the
+      // selection collapsed across boundaries during the click.
+      let currentList: HTMLElement | null = null;
+      if (startEl && el.contains(startEl)) {
+        currentList = startEl.closest("ul, ol") as HTMLElement | null;
+      }
+      if (!currentList && sel?.focusNode) {
+        const fEl = elNodeFromSelection(sel.focusNode);
+        if (fEl && el.contains(fEl)) {
+          currentList = fEl.closest("ul, ol") as HTMLElement | null;
+        }
+      }
 
+      // Already in a list — convert in place, regardless of source/target.
       if (currentList) {
         convertListInPlace(currentList, kind);
         flush();
@@ -538,15 +548,11 @@ export default function Editor() {
         return;
       }
 
-      if (kind === "ul") {
-        exec("insertUnorderedList");
-        // execCommand makes a plain <ul>; strip any inherited class.
-        const made = el.querySelector("ul:not([class])");
-        if (made instanceof HTMLElement) made.className = "";
-        return;
-      }
-      if (kind === "ol") {
-        exec("insertOrderedList");
+      // Not in a list — insert a fresh one of the requested kind.
+      if (kind === "ul" || kind === "ol") {
+        exec(
+          kind === "ul" ? "insertUnorderedList" : "insertOrderedList"
+        );
         return;
       }
       const cls = kind === "cb" ? "cb-list" : "rb-list";
@@ -838,9 +844,15 @@ function placeCaretIn(el: HTMLElement) {
 }
 
 /**
- * Convert an existing list (ul / ul.cb-list / ul.rb-list / ol) to a new
- * kind, preserving its <li> children and the caret position. If the new
- * kind has a different tag, swap the tag; otherwise just toggle the class.
+ * Convert an existing list (ul / ul.cb-list / ul.rb-list / ol) to any of
+ * the four kinds. Works for every direction:
+ *   ul ↔ ol            (different tag → swap tag)
+ *   ul ↔ ul.cb-list    (same tag → swap class)
+ *   ol ↔ ul.cb-list    (different tag AND different class)
+ *   …all 16 combinations.
+ *
+ * Caret position is saved and restored explicitly because some browsers
+ * detach the selection when `replaceChild` mutates the DOM.
  */
 function convertListInPlace(
   list: HTMLElement,
@@ -849,19 +861,66 @@ function convertListInPlace(
   const newTag = kind === "ol" ? "ol" : "ul";
   const newClass =
     kind === "cb" ? "cb-list" : kind === "rb" ? "rb-list" : "";
+
+  // Snapshot the caret so we can re-anchor it after DOM swap.
+  const sel = window.getSelection();
+  let savedNode: Node | null = null;
+  let savedOffset = 0;
+  if (sel && sel.rangeCount > 0) {
+    const r = sel.getRangeAt(0);
+    savedNode = r.startContainer;
+    savedOffset = r.startOffset;
+  }
+
+  const restoreCaret = () => {
+    if (!sel || !savedNode) return;
+    if (!savedNode.isConnected && !document.contains(savedNode)) return;
+    try {
+      const max =
+        savedNode.nodeType === Node.TEXT_NODE
+          ? (savedNode.textContent?.length ?? 0)
+          : savedNode.childNodes.length;
+      const r = document.createRange();
+      r.setStart(savedNode, Math.min(savedOffset, max));
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // Strip any per-item list-style inline styles (browsers occasionally
+  // leave behind `list-style-type` on <li>s from execCommand) so the new
+  // marker can render cleanly.
+  const cleanListItems = (host: HTMLElement) => {
+    host.querySelectorAll("li").forEach((li) => {
+      if (li instanceof HTMLElement) {
+        li.style.removeProperty("list-style");
+        li.style.removeProperty("list-style-type");
+      }
+    });
+  };
+
   const currentTag = list.tagName.toLowerCase();
 
+  // Same tag — just adjust the class (covers ul ↔ ul.cb-list ↔ ul.rb-list).
   if (currentTag === newTag) {
     list.className = newClass;
+    cleanListItems(list);
+    restoreCaret();
     return;
   }
+
+  // Different tag — swap the wrapper element.
   const parent = list.parentNode;
   if (!parent) return;
   const replacement = document.createElement(newTag);
   if (newClass) replacement.className = newClass;
-  // Move children over (preserves text nodes / caret refs).
   while (list.firstChild) replacement.appendChild(list.firstChild);
   parent.replaceChild(replacement, list);
+  cleanListItems(replacement);
+  restoreCaret();
 }
 
 function currentBlock(node: Node | null, root: HTMLElement): HTMLElement | null {

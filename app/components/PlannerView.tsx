@@ -108,7 +108,7 @@ export default function PlannerView() {
         </button>
       </div>
 
-      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] shadow-sm overflow-hidden">
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
         {/* Header */}
         <div className="flex items-center justify-between px-8 py-6 border-b border-[var(--border)]">
           <h1 className="text-3xl font-bold tracking-tight">Planner</h1>
@@ -288,6 +288,10 @@ function AddTaskModal({
     linkedFolderId?: string | null;
   }) => void;
 }) {
+  // The form holds its own state; we trigger its submit via this ref.
+  const submitRef = useRef<() => void>(() => {});
+  const [canSubmit, setCanSubmit] = useState(false);
+
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -308,13 +312,14 @@ function AddTaskModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-3xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl overflow-hidden modal-pop"
+        className="w-full max-w-lg max-h-[90vh] rounded-3xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl modal-pop flex flex-col"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label="New task"
       >
-        <header className="px-6 py-5 border-b border-[var(--border)] flex items-center justify-between">
+        {/* Header — fixed */}
+        <header className="shrink-0 px-6 py-5 border-b border-[var(--border)] flex items-center justify-between">
           <div>
             <h2 className="text-xl font-bold tracking-tight">New task</h2>
             <p className="text-xs text-[var(--muted)] mt-0.5">
@@ -330,12 +335,35 @@ function AddTaskModal({
           </button>
         </header>
 
-        <div className="px-6 py-5">
+        {/* Scrollable body — grows + scrolls if the link picker opens */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
           <AddTaskForm
             defaultDate={defaultDate}
-            onCancel={onClose}
             onSubmit={onSubmit}
+            registerSubmit={(fn) => {
+              submitRef.current = fn;
+            }}
+            onValidChange={setCanSubmit}
           />
+        </div>
+
+        {/* Footer — fixed, always visible regardless of body scroll */}
+        <div className="shrink-0 px-6 py-3 border-t border-[var(--border)] flex items-center gap-2 justify-end bg-[var(--surface)] rounded-b-3xl">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-sm text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => submitRef.current()}
+            disabled={!canSubmit}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-[var(--foreground)] text-[var(--surface)] disabled:opacity-40 disabled:cursor-not-allowed transition"
+          >
+            <PlusIcon size={13} /> Create task
+          </button>
         </div>
       </div>
     </div>
@@ -612,11 +640,11 @@ function LinkedBadge({
 
 function AddTaskForm({
   defaultDate,
-  onCancel,
   onSubmit,
+  registerSubmit,
+  onValidChange,
 }: {
   defaultDate: string;
-  onCancel: () => void;
   onSubmit: (p: {
     title: string;
     startDate: string;
@@ -625,6 +653,8 @@ function AddTaskForm({
     linkedFileId?: string | null;
     linkedFolderId?: string | null;
   }) => void;
+  registerSubmit?: (fn: () => void) => void;
+  onValidChange?: (valid: boolean) => void;
 }) {
   const { state } = useStore();
   const [title, setTitle] = useState("");
@@ -678,6 +708,15 @@ function AddTaskForm({
     });
   };
 
+  // Expose the submit handler to the modal's sticky footer + report
+  // validity so it can enable/disable the "Create" button.
+  useEffect(() => {
+    registerSubmit?.(submit);
+    onValidChange?.(title.trim().length > 0);
+    // submit closes over local state; re-register on every change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, time, repeat, linkedFileId, linkedFolderId]);
+
   return (
     <div className="flex flex-col gap-5">
       <Field label="Task name">
@@ -687,7 +726,6 @@ function AddTaskForm({
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") submit();
-            if (e.key === "Escape") onCancel();
           }}
           placeholder="What do you want to get done?"
           className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
@@ -827,24 +865,6 @@ function AddTaskForm({
           </p>
         )}
       </Field>
-
-      <div className="flex items-center gap-2 justify-end pt-2 border-t border-[var(--border)] mt-1">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="px-4 py-2 rounded-xl text-sm text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!title.trim()}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-[var(--foreground)] text-[var(--surface)] disabled:opacity-40 disabled:cursor-not-allowed transition"
-        >
-          <PlusIcon size={13} /> Create task
-        </button>
-      </div>
     </div>
   );
 }

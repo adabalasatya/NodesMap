@@ -370,6 +370,24 @@ function AddTaskModal({
   );
 }
 
+function CheckCircleGlyph() {
+  return (
+    <svg
+      width={12}
+      height={12}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8 12l3 3 5-6" />
+    </svg>
+  );
+}
+
 function CloseGlyph() {
   return (
     <svg
@@ -438,21 +456,27 @@ function TaskRow({
           {task.title}
         </div>
         <div className="mt-1 flex items-center gap-2 text-xs text-[var(--muted)] flex-wrap">
-          <span className="px-2 py-0.5 rounded-full bg-[var(--surface-2)] text-[10px]">
-            {task.repeat === "once"
-              ? "Today"
-              : task.repeat === "daily"
-              ? "Every day"
-              : "Every week"}
-          </span>
-          {task.time && (
-            <span className="tabular-nums text-[10px]">{task.time}</span>
-          )}
-          {autoCompleted && (
-            <span className="inline-flex items-center gap-1 text-[10px]">
-              <CheckIcon size={10} />
-              Auto-completed
+          {done ? (
+            /* Completed state — collapse repeat + time into a single
+               completion badge. Auto-completed tasks get the "Auto-..."
+               label, manual ones get plain "Completed". */
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--surface-2)] text-[var(--foreground)] text-[10px] font-medium">
+              <CheckCircleGlyph />
+              {autoCompleted ? "Auto-completed" : "Completed"}
             </span>
+          ) : (
+            <>
+              <span className="px-2 py-0.5 rounded-full bg-[var(--surface-2)] text-[10px]">
+                {task.repeat === "once"
+                  ? "Today"
+                  : task.repeat === "daily"
+                  ? "Every day"
+                  : "Every week"}
+              </span>
+              {task.time && (
+                <span className="tabular-nums text-[10px]">{task.time}</span>
+              )}
+            </>
           )}
           {isLinked && (
             <LinkedBadge

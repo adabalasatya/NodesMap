@@ -571,14 +571,14 @@ export default function Sidebar() {
                     alert(
                       "Your data has been deleted and you've been signed out.\n\n" +
                         "The account record itself could not be removed automatically — " +
-                        "email satya1adabala@gmail.com to confirm full deletion of the auth record."
+                        "DM @NodesMap on X (https://x.com/NodesMap) to confirm full deletion of the auth record."
                     );
                   }
                 } catch (e) {
                   alert(
                     "Could not delete your account: " +
                       (e instanceof Error ? e.message : String(e)) +
-                      "\n\nEmail satya1adabala@gmail.com for help."
+                      "\n\nDM @NodesMap on X (https://x.com/NodesMap) for help."
                   );
                 }
               }}

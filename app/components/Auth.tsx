@@ -4,28 +4,31 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../lib/auth";
 import { GoogleIcon } from "./icons";
 
-const SUPPORT_EMAIL = "satya1adabala@gmail.com";
+const SUPPORT_URL = "https://x.com/NodesMap";
+const SUPPORT_HANDLE = "@NodesMap";
 
+// Showcase uses the same screenshots as the onboarding tour so the
+// landing page and the post-login onboarding feel consistent.
 const SHOWCASE = [
   {
-    img: "/showcase/dashboard.jpeg",
+    img: "/onboardingImages/folder.jpeg",
     title: "Organize everything in folders",
-    desc: "Group your notes into colour-coded folders and watch each one fill up as you complete it.",
+    desc: "Every topic starts as a folder on your Home dashboard — open one to drill into its notes and progress.",
   },
   {
-    img: "/showcase/editor.jpeg",
-    title: "Write in clean Markdown",
-    desc: "A distraction-free editor with live Markdown — headings, lists, code and tasks, all formatted as you type.",
+    img: "/onboardingImages/folder2.jpeg",
+    title: "Nest sub-folders as deep as you like",
+    desc: "Folders inside folders. Group sub-topics, drop files in, and let the structure grow with what you're learning.",
   },
   {
-    img: "/showcase/progress.jpeg",
-    title: "Track your progress",
-    desc: "See completion stats, streaks and per-folder breakdowns so you always know what's left to do.",
+    img: "/onboardingImages/planner.jpeg",
+    title: "Plan your study sessions",
+    desc: "Schedule tasks for any day in the Planner, link them to a folder or file, and they auto-complete when the work is done.",
   },
   {
-    img: "/showcase/mindmap.jpeg",
+    img: "/onboardingImages/mindmap.jpeg",
     title: "Visualize as a mind map",
-    desc: "A radial mind map connects every folder and note, giving you the whole picture at a glance.",
+    desc: "A radial mind map connects every folder, sub-folder and note with progress wrapped around each node.",
   },
 ];
 
@@ -39,6 +42,20 @@ function extractMessage(e: unknown): string {
       return o.error_description as string;
   }
   return String(e ?? "Unknown error");
+}
+
+function XGlyph() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden
+    >
+      <path d="M18.244 2H21l-6.69 7.65L22 22h-6.91l-4.61-6.02L4.97 22H2.21l7.18-8.21L2 2h7.07l4.18 5.55L18.24 2zm-2.42 18h1.7L8.27 4H6.5l9.32 16z" />
+    </svg>
+  );
 }
 
 function SignInModal({ onClose }: { onClose: () => void }) {
@@ -216,13 +233,15 @@ export default function Auth() {
                 <span className="size-2.5 rounded-full bg-[#febc2e]" />
                 <span className="size-2.5 rounded-full bg-[#28c840]" />
               </div>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={item.img}
-                alt={item.title}
-                className="w-full bg-[var(--surface-2)] transition-transform duration-300 group-hover:scale-[1.02]"
-                loading="lazy"
-              />
+              <div className="bg-[var(--surface-2)] h-56 grid place-items-center p-3 overflow-hidden">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={item.img}
+                  alt={item.title}
+                  className="max-w-full max-h-full w-auto h-auto object-contain transition-transform duration-300 group-hover:scale-[1.02]"
+                  loading="lazy"
+                />
+              </div>
               <div className="p-6">
                 <h3 className="font-semibold text-lg">{item.title}</h3>
                 <p className="text-sm text-[var(--muted)] mt-2 leading-relaxed">
@@ -246,10 +265,13 @@ export default function Auth() {
             usually reply within a day.
           </p>
           <a
-            href={`mailto:${SUPPORT_EMAIL}`}
-            className="inline-flex items-center gap-2 mt-6 rounded-full bg-[var(--accent)] text-white px-6 py-3 text-sm font-medium hover:opacity-90 transition"
+            href={SUPPORT_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 mt-6 rounded-full bg-[var(--foreground)] text-[var(--surface)] px-6 py-3 text-sm font-medium hover:opacity-90 transition"
           >
-            Email {SUPPORT_EMAIL}
+            <XGlyph />
+            DM us {SUPPORT_HANDLE} on X
           </a>
         </div>
       </section>

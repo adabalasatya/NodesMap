@@ -7,6 +7,7 @@ import {
   useStore,
 } from "../lib/store";
 import {
+  CheckIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -316,23 +317,25 @@ function FileTreeRow({
       className="flex items-center gap-2 rounded-xl py-2 pr-4 text-left hover:bg-[var(--surface-2)] transition"
       style={{ paddingLeft: 16 + indent + 24 }}
     >
-      <FileIcon
-        size={12}
-        className={`shrink-0 ${
-          file.isCompleted
-            ? "text-[var(--foreground)]"
-            : "text-[var(--muted)]"
-        }`}
-      />
+      {file.isCompleted ? (
+        <span
+          className="shrink-0 grid place-items-center size-4 rounded-full bg-[var(--foreground)] text-[var(--surface)]"
+          aria-hidden
+        >
+          <CheckIcon size={10} />
+        </span>
+      ) : (
+        <FileIcon
+          size={12}
+          className="shrink-0 text-[var(--muted)]"
+        />
+      )}
       <span
         className={`text-sm truncate flex-1 ${
           file.isCompleted ? "text-[var(--muted)]" : ""
         }`}
       >
         {file.title.replace(/\.md$/i, "")}
-      </span>
-      <span className="text-[11px] text-[var(--muted)] tabular-nums shrink-0">
-        {file.isCompleted ? "100%" : "0%"}
       </span>
     </button>
   );

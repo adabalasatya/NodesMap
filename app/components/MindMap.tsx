@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useStore } from "../lib/store";
+import { selectFolderProgressDeep, useStore } from "../lib/store";
 import type { Folder, NoteFile } from "../lib/types";
 import { ChevronLeftIcon } from "./icons";
 
@@ -254,14 +254,31 @@ function FolderNode({
   delay: number;
   onOpen: (id: string) => void;
 }) {
+  const { state } = useStore();
   const r = isRoot ? 50 : Math.max(28, 40 - node.depth * 3);
   const fontSize = isRoot ? 14 : Math.max(9, 12 - Math.max(0, node.depth - 1));
   const lines = wrapLabel(node.label, 12);
   const lineHeight = fontSize + 2;
   const totalH = (lines.length - 1) * lineHeight;
-  const stroke = isRoot ? "var(--foreground)" : "var(--foreground)";
+  const stroke = "var(--foreground)";
   const fill = isRoot ? "var(--foreground)" : "var(--surface)";
   const textFill = isRoot ? "var(--surface)" : "var(--foreground)";
+
+  // Deep progress (this folder + every nested file) → fraction in 0..1.
+  const progress = node.folder
+    ? selectFolderProgressDeep(state, node.folder.id)
+    : { total: 0, done: 0, pct: 0 };
+  const fraction =
+    progress.total > 0 ? progress.done / progress.total : 0;
+
+  // The progress arc lives just outside the folder bubble.
+  const arcR = r + (isRoot ? 8 : 6);
+  const arcStrokeW = isRoot ? 3 : 2.6;
+  const circumference = 2 * Math.PI * arcR;
+  const dashLen = circumference * fraction;
+  // Start the arc at 12 o'clock and run clockwise.
+  const arcRotation = -90;
+
   return (
     <g
       className="mm-node cursor-pointer"
@@ -279,13 +296,31 @@ function FolderNode({
           className="mm-halo"
         />
       )}
+      {/* Background track for the progress ring */}
       <circle
         cx={0}
         cy={0}
-        r={r + (isRoot ? 6 : 4)}
-        fill="var(--foreground)"
-        opacity={isRoot ? 0.1 : 0.05}
+        r={arcR}
+        fill="none"
+        stroke="var(--border)"
+        strokeWidth={arcStrokeW}
+        opacity={0.7}
       />
+      {/* Filled portion */}
+      {progress.total > 0 && fraction > 0 && (
+        <circle
+          cx={0}
+          cy={0}
+          r={arcR}
+          fill="none"
+          stroke="var(--foreground)"
+          strokeWidth={arcStrokeW}
+          strokeDasharray={`${dashLen} ${circumference}`}
+          strokeLinecap="round"
+          transform={`rotate(${arcRotation})`}
+          style={{ transition: "stroke-dasharray 300ms ease" }}
+        />
+      )}
       <circle
         cx={0}
         cy={0}

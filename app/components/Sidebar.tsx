@@ -181,10 +181,19 @@ export default function Sidebar() {
           style={{ paddingLeft: 8 + depth * 14 }}
           onClick={() => {
             setOpen((o) => ({ ...o, [folder.id]: true }));
+            // Stay on the current "view" type for whole-app views like
+            // Mind map / Planner / Progress so the user can re-scope them
+            // without being kicked back to the folder content.
+            const keepView =
+              state.view === "mindmap" ||
+              state.view === "planner" ||
+              state.view === "progress"
+                ? state.view
+                : "folder";
             dispatch({
               type: "SET_VIEW",
               payload: {
-                view: "folder",
+                view: keepView,
                 folderId: folder.id,
                 fileId: null,
               },
@@ -300,24 +309,6 @@ export default function Sidebar() {
         {isOpen && (
           <>
             {subFolders.map((sub) => renderFolder(sub, depth + 1))}
-            {creating && creating.parentId === folder.id && (
-              <input
-                autoFocus
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onBlur={submitNewFolder}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submitNewFolder();
-                  if (e.key === "Escape") {
-                    setCreating(null);
-                    setNewName("");
-                  }
-                }}
-                placeholder="Subfolder name"
-                style={{ marginLeft: 22 + (depth + 1) * 14 }}
-                className="mt-1 bg-[var(--surface-2)] rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              />
-            )}
             {visibleFiles.map((file) => {
               const fileSelected = state.currentFileId === file.id;
               return (
@@ -450,25 +441,6 @@ export default function Sidebar() {
       >
         {newFolderLabel}
       </button>
-
-      {/* Inline folder name input (root) */}
-      {creating && creating.parentId === null && (
-        <input
-          autoFocus
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onBlur={submitNewFolder}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submitNewFolder();
-            if (e.key === "Escape") {
-              setCreating(null);
-              setNewName("");
-            }
-          }}
-          placeholder="Folder name"
-          className="mt-2 w-full bg-[var(--surface-2)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
-        />
-      )}
 
       {/* Search (icon on right) */}
       <div className="mt-3 relative">
@@ -605,7 +577,119 @@ export default function Sidebar() {
           onClose={() => setMenu(null)}
         />
       )}
+
+      {creating && (
+        <CreateFolderModal
+          parentFolder={
+            creating.parentId
+              ? state.folders.find((f) => f.id === creating.parentId) ?? null
+              : null
+          }
+          name={newName}
+          onName={setNewName}
+          onCancel={() => {
+            setCreating(null);
+            setNewName("");
+          }}
+          onSubmit={submitNewFolder}
+        />
+      )}
     </aside>
+  );
+}
+
+/* ---------------------- Create-folder modal ---------------------- */
+
+function CreateFolderModal({
+  parentFolder,
+  name,
+  onName,
+  onCancel,
+  onSubmit,
+}: {
+  parentFolder: Folder | null;
+  name: string;
+  onName: (v: string) => void;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    document.addEventListener("keydown", onEsc);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onEsc);
+      document.body.style.overflow = prev;
+    };
+  }, [onCancel]);
+
+  const isSub = !!parentFolder;
+  const canSubmit = name.trim().length > 0;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-md rounded-3xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl modal-pop flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={isSub ? "New subfolder" : "New folder"}
+      >
+        <header className="shrink-0 px-6 py-5 border-b border-[var(--border)]">
+          <h2 className="text-xl font-bold tracking-tight">
+            {isSub ? "New subfolder" : "New folder"}
+          </h2>
+          <p className="text-xs text-[var(--muted)] mt-0.5 truncate">
+            {isSub
+              ? `Will be created inside ${parentFolder!.name}`
+              : "Will be created at the root"}
+          </p>
+        </header>
+
+        <div className="px-6 py-5">
+          <label className="block">
+            <span className="block text-xs font-medium text-[var(--muted)] mb-1.5">
+              Folder name
+            </span>
+            <input
+              autoFocus
+              value={name}
+              onChange={(e) => onName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && canSubmit) onSubmit();
+              }}
+              placeholder={isSub ? "Subfolder name" : "Folder name"}
+              className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            />
+          </label>
+        </div>
+
+        <div className="shrink-0 px-6 py-3 border-t border-[var(--border)] flex items-center gap-2 justify-end rounded-b-3xl">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 rounded-xl text-sm text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={!canSubmit}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-[var(--foreground)] text-[var(--surface)] disabled:opacity-40 disabled:cursor-not-allowed transition"
+          >
+            <FolderPlusIcon size={13} />
+            {isSub ? "Create subfolder" : "Create folder"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

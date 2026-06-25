@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import {
-  selectFolderProgress,
   selectFolderProgressDeep,
   useStore,
 } from "../lib/store";
@@ -36,7 +35,6 @@ export default function FolderView() {
     );
   }
 
-  const { total, done, pct } = selectFolderProgress(state, folder.id);
   const deep = selectFolderProgressDeep(state, folder.id);
   const search = state.search.toLowerCase();
   const subFolders = state.folders
@@ -139,18 +137,8 @@ export default function FolderView() {
       </div>
 
       <div className="mb-6">
-        <div className="flex items-center justify-between mb-2">
-          <div className="text-sm text-[var(--muted)]">
-            {deep.done} of {deep.total} files completed
-            {deep.total !== total && (
-              <span className="ml-2 text-[var(--muted)]/70">
-                ({done}/{total} in this folder)
-              </span>
-            )}
-          </div>
-          <div className="text-sm font-medium tabular-nums">
-            {deep.pct}%
-          </div>
+        <div className="text-sm text-[var(--muted)] mb-2">
+          {deep.done} of {deep.total} files completed
         </div>
         <div className="w-full h-1 rounded-full bg-[var(--surface-2)] overflow-hidden">
           <div
@@ -202,19 +190,8 @@ export default function FolderView() {
                     {sub.name}
                   </div>
                 </div>
-                <div className="mt-auto">
-                  <div className="text-xs text-[var(--muted)] mb-1.5 tabular-nums">
-                    {sp.done}/{sp.total} done
-                  </div>
-                  <div className="w-full h-1 rounded-full bg-[var(--surface-2)] overflow-hidden">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${sp.pct}%`,
-                        background: "var(--foreground)",
-                      }}
-                    />
-                  </div>
+                <div className="mt-auto text-xs text-[var(--muted)] tabular-nums">
+                  {sp.done}/{sp.total} done
                 </div>
               </div>
             );

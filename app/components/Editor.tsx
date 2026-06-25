@@ -661,58 +661,129 @@ export default function Editor() {
     [flush, updateFormats]
   );
 
-  /* Click anywhere in the editor's blank space (background, or directly
-     below a <pre>) — move the caret OUT of any code block to the
-     nearest writable paragraph. */
+  /* Background click in the editor — place the caret where the user
+     actually tapped (above / below / between blocks), not at the
+     bottom. We map the click coordinates to a caret position via
+     `caretRangeFromPoint`. If the resulting position lands inside a
+     <pre> but the click was visually outside it, we escape to (or
+     create) a sibling paragraph on the matching side. */
   const onEditorClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       const el = editorRef.current;
       if (!el) return;
       const target = e.target as Element;
 
-      const ensureTrailingP = (after: HTMLElement): HTMLElement => {
-        const sib = after.nextElementSibling;
-        if (sib && sib.tagName === "P") return sib as HTMLElement;
+      const ensureAdjacentP = (
+        pre: HTMLElement,
+        isAbove: boolean
+      ): HTMLElement => {
+        const sib = isAbove
+          ? pre.previousElementSibling
+          : pre.nextElementSibling;
+        if (sib instanceof HTMLElement && sib.tagName !== "PRE") return sib;
         const p = document.createElement("p");
         p.appendChild(document.createElement("br"));
-        after.after(p);
+        if (isAbove) pre.before(p);
+        else pre.after(p);
         return p;
       };
 
-      // Click landed on the editor's empty background.
-      if (target === el) {
-        const last = el.lastElementChild as HTMLElement | null;
-        if (!last) return;
-        // If the last block is a <pre>, drop the caret into a fresh
-        // paragraph right after it.
-        if (last.tagName === "PRE") {
-          const p = ensureTrailingP(last);
-          placeCaretIn(p);
-          flush();
-        } else {
-          const r = document.createRange();
-          r.selectNodeContents(last);
-          r.collapse(false);
-          const s = window.getSelection();
-          s?.removeAllRanges();
-          s?.addRange(r);
+      // Browser-native caret placement is correct for clicks that hit a
+      // real content element — leave it alone.
+      if (target !== el) return;
+
+      const x = e.clientX;
+      const y = e.clientY;
+
+      // 1) Try caret-from-point so the caret lands as close as possible
+      //    to where the user actually clicked.
+      type CaretPoint = {
+        offsetNode: Node;
+        offset: number;
+      };
+      const docAny = document as Document & {
+        caretRangeFromPoint?: (x: number, y: number) => Range | null;
+        caretPositionFromPoint?: (x: number, y: number) => CaretPoint | null;
+      };
+      let range: Range | null = null;
+      if (docAny.caretRangeFromPoint) {
+        range = docAny.caretRangeFromPoint(x, y);
+      } else if (docAny.caretPositionFromPoint) {
+        const pos = docAny.caretPositionFromPoint(x, y);
+        if (pos) {
+          range = document.createRange();
+          range.setStart(pos.offsetNode, pos.offset);
+          range.collapse(true);
         }
+      }
+
+      if (range && el.contains(range.startContainer)) {
+        // If the caret resolved to inside a <pre> but the click landed
+        // visually above/below the code box, escape to the matching
+        // sibling paragraph.
+        const startEl =
+          range.startContainer.nodeType === Node.ELEMENT_NODE
+            ? (range.startContainer as Element)
+            : range.startContainer.parentElement;
+        const preAncestor = startEl?.closest("pre") as HTMLElement | null;
+        if (preAncestor) {
+          const preRect = preAncestor.getBoundingClientRect();
+          if (y < preRect.top - 2 || y > preRect.bottom + 2) {
+            const above = y < preRect.top;
+            const p = ensureAdjacentP(preAncestor, above);
+            placeCaretIn(p);
+            flush();
+            return;
+          }
+        }
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
         return;
       }
 
-      // Click landed inside a code block — leave alone (user wants to type
-      // code). The standard browser caret placement covers this.
-      const insidePre = target.closest("pre");
-      if (insidePre) return;
+      // 2) Fallback: caret-from-point unavailable / off the document.
+      //    Pick the block nearest to the click's y-coordinate and place
+      //    the caret at its start (click above the block) or end
+      //    (click below).
+      const blocks = Array.from(el.children).filter(
+        (c): c is HTMLElement => c instanceof HTMLElement
+      );
+      if (blocks.length === 0) return;
 
-      // Otherwise: if the click is on a paragraph immediately after a
-      // <pre> and that paragraph is empty, browsers sometimes still
-      // anchor inside the <pre>. Force the caret into the clicked block.
-      const block = (target as HTMLElement).closest?.("p,div,h1,h2,h3,li");
-      if (block instanceof HTMLElement && el.contains(block)) {
-        // Let the browser's default click-to-caret behavior win.
+      let nearest: HTMLElement = blocks[0];
+      let minDist = Infinity;
+      for (const b of blocks) {
+        const rect = b.getBoundingClientRect();
+        let dist;
+        if (y < rect.top) dist = rect.top - y;
+        else if (y > rect.bottom) dist = y - rect.bottom;
+        else dist = 0;
+        if (dist < minDist) {
+          minDist = dist;
+          nearest = b;
+        }
+      }
+
+      const nearestRect = nearest.getBoundingClientRect();
+      const aboveBlock = y < nearestRect.top;
+
+      // Click landed near a code block — pop out to the adjacent paragraph.
+      if (nearest.tagName === "PRE") {
+        const p = ensureAdjacentP(nearest, aboveBlock);
+        placeCaretIn(p);
+        flush();
         return;
       }
+
+      // Place caret at the start of the nearest block when clicked
+      // above it, at the end when clicked below.
+      const r = document.createRange();
+      r.selectNodeContents(nearest);
+      r.collapse(aboveBlock);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(r);
     },
     [flush]
   );

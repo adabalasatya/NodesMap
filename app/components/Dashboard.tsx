@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { selectFolderProgressDeep, useStore } from "../lib/store";
-import { FolderIcon, PlusIcon } from "./icons";
+import { FolderIcon, GridIcon, ListIcon, PlusIcon } from "./icons";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import { useDialog } from "./Dialog";
 
@@ -34,8 +34,40 @@ export default function Dashboard() {
 
   return (
     <div className="p-8 fade-in">
-      <div className="text-[11px] font-medium tracking-[0.15em] text-[var(--muted)] uppercase mb-4">
-        Folders
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-[11px] font-medium tracking-[0.15em] text-[var(--muted)] uppercase">
+          Folders
+        </div>
+        <div className="inline-flex rounded-lg border border-[var(--border)] p-0.5">
+          <button
+            aria-label="Grid view"
+            onClick={() =>
+              dispatch({ type: "SET_VIEW_MODE", payload: "grid" })
+            }
+            className={`p-1.5 rounded-md transition ${
+              state.viewMode === "grid"
+                ? "bg-[var(--surface-2)] text-[var(--foreground)]"
+                : "text-[var(--muted)] hover:text-[var(--foreground)]"
+            }`}
+            title="Grid view"
+          >
+            <GridIcon size={14} />
+          </button>
+          <button
+            aria-label="List view"
+            onClick={() =>
+              dispatch({ type: "SET_VIEW_MODE", payload: "list" })
+            }
+            className={`p-1.5 rounded-md transition ${
+              state.viewMode === "list"
+                ? "bg-[var(--surface-2)] text-[var(--foreground)]"
+                : "text-[var(--muted)] hover:text-[var(--foreground)]"
+            }`}
+            title="List view"
+          >
+            <ListIcon size={14} />
+          </button>
+        </div>
       </div>
 
       <div

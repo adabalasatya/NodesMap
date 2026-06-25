@@ -15,8 +15,6 @@ import {
   FileIcon,
   FolderIcon,
   FolderPlusIcon,
-  GridIcon,
-  ListIcon,
   LogOutIcon,
   SearchIcon,
   SettingsIcon,
@@ -428,32 +426,29 @@ export default function Sidebar() {
 
   return (
     <aside className="h-screen w-72 shrink-0 flex flex-col border-r border-[var(--border)] bg-[var(--surface)] p-3">
-      {/* Top icon row */}
-      <div className="flex items-center gap-1.5">
-        <div className="inline-flex rounded-lg border border-[var(--border)] p-0.5">
-          <button
-            aria-label="Grid view"
-            onClick={() => dispatch({ type: "SET_VIEW_MODE", payload: "grid" })}
-            className={`p-1.5 rounded-md transition ${
-              state.viewMode === "grid"
-                ? "bg-[var(--surface-2)] text-[var(--foreground)]"
-                : "text-[var(--muted)] hover:text-[var(--foreground)]"
-            }`}
-          >
-            <GridIcon size={14} />
-          </button>
-          <button
-            aria-label="List view"
-            onClick={() => dispatch({ type: "SET_VIEW_MODE", payload: "list" })}
-            className={`p-1.5 rounded-md transition ${
-              state.viewMode === "list"
-                ? "bg-[var(--surface-2)] text-[var(--foreground)]"
-                : "text-[var(--muted)] hover:text-[var(--foreground)]"
-            }`}
-          >
-            <ListIcon size={14} />
-          </button>
-        </div>
+      {/* Top icon row — brand on the left, collapse on the right */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() =>
+            dispatch({
+              type: "SET_VIEW",
+              payload: { view: "dashboard", folderId: null, fileId: null },
+            })
+          }
+          className="flex items-center gap-2 px-1 py-0.5 rounded-lg hover:bg-[var(--surface-2)] transition"
+          title="Home"
+          aria-label="Home"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/NodesMap_Icon.png"
+            alt="NodesMap"
+            className="size-7 rounded-full object-cover"
+          />
+          <span className="text-sm font-semibold tracking-tight">
+            NodesMap
+          </span>
+        </button>
         <button
           onClick={() => setCollapsed(true)}
           aria-label="Collapse sidebar"

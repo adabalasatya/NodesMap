@@ -205,19 +205,6 @@ export default function Sidebar() {
           onContextMenu={(e) =>
             openContext(e, [
               {
-                label: isOpen ? "Collapse" : "Expand",
-                onSelect: () =>
-                  setOpen((o) => ({ ...o, [folder.id]: !isOpen })),
-              },
-              {
-                label: "New subfolder",
-                onSelect: () => {
-                  setOpen((o) => ({ ...o, [folder.id]: true }));
-                  setCreating({ parentId: folder.id });
-                  setNewName("");
-                },
-              },
-              {
                 label: "Rename",
                 onSelect: async () => {
                   const name = await dialog.prompt({
@@ -231,47 +218,6 @@ export default function Sidebar() {
                       type: "RENAME_FOLDER",
                       payload: { id: folder.id, name: name.trim() },
                     });
-                },
-              },
-              {
-                label: "Move to…",
-                onSelect: async () => {
-                  const ans = await dialog.prompt({
-                    title: "Move folder",
-                    message:
-                      "Move into which folder? Type the destination folder name, or leave empty to move to the root.",
-                    placeholder: "Destination folder",
-                    defaultValue: folder.parentId
-                      ? state.folders.find((x) => x.id === folder.parentId)
-                          ?.name ?? ""
-                      : "",
-                    okLabel: "Move",
-                  });
-                  if (ans === null) return;
-                  const target = ans.trim();
-                  if (!target) {
-                    dispatch({
-                      type: "MOVE_FOLDER",
-                      payload: { id: folder.id, parentId: null },
-                    });
-                    return;
-                  }
-                  const match = state.folders.find(
-                    (x) =>
-                      x.id !== folder.id &&
-                      x.name.toLowerCase() === target.toLowerCase()
-                  );
-                  if (!match) {
-                    await dialog.alert({
-                      title: "Folder not found",
-                      message: `No folder named “${target}”.`,
-                    });
-                    return;
-                  }
-                  dispatch({
-                    type: "MOVE_FOLDER",
-                    payload: { id: folder.id, parentId: match.id },
-                  });
                 },
               },
               {

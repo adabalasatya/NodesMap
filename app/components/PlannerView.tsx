@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { taskDoneOn, taskShowsOn, useStore } from "../lib/store";
 import type { RepeatKind, Task } from "../lib/types";
 import {
@@ -689,6 +690,34 @@ function AddTaskForm({
   const [linkedFileId, setLinkedFileId] = useState<string | null>(null);
   const [linkedFolderId, setLinkedFolderId] = useState<string | null>(null);
   const linkRef = useRef<HTMLDivElement | null>(null);
+  const linkBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [pickerPos, setPickerPos] = useState<{
+    left: number;
+    bottom: number;
+    width: number;
+  } | null>(null);
+
+  // Compute popup position so it floats just ABOVE the trigger button.
+  // Re-measure when (a) the picker opens, and (b) the window resizes.
+  useEffect(() => {
+    if (!linkOpen) {
+      setPickerPos(null);
+      return;
+    }
+    const measure = () => {
+      const btn = linkBtnRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setPickerPos({
+        left: r.left,
+        bottom: window.innerHeight - r.top + 8,
+        width: r.width,
+      });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [linkOpen]);
 
   const folderPath = (folderId: string): string => {
     const parts: string[] = [];
@@ -792,8 +821,9 @@ function AddTaskForm({
       </div>
 
       <Field label="Link a folder or file (optional)">
-        <div className="relative" ref={linkRef}>
+        <div ref={linkRef}>
           <button
+            ref={linkBtnRef}
             type="button"
             onClick={() => setLinkOpen((v) => !v)}
             className={`w-full inline-flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl border text-sm transition ${
@@ -806,81 +836,99 @@ function AddTaskForm({
               {linkLabel ? linkLabel : "Pick something to link"}
             </span>
             <span className="text-[var(--muted)] shrink-0">
-              {linkOpen ? "▴" : "▾"}
+              {linkOpen ? "▾" : "▴"}
             </span>
           </button>
-          {linkOpen && (
-            <div className="absolute left-0 right-0 top-full mt-2 max-h-72 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-lg z-30 p-1.5">
-              <input
-                value={linkSearch}
-                onChange={(e) => setLinkSearch(e.target.value)}
-                placeholder="Search folders / files…"
-                className="w-full bg-[var(--surface-2)] rounded-lg px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-[var(--accent)] mb-2"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  setLinkedFileId(null);
-                  setLinkedFolderId(null);
-                  setLinkOpen(false);
+          {linkOpen && pickerPos &&
+            typeof window !== "undefined" &&
+            createPortal(
+              <div
+                style={{
+                  position: "fixed",
+                  left: pickerPos.left,
+                  bottom: pickerPos.bottom,
+                  width: pickerPos.width,
+                  maxHeight: 320,
+                  zIndex: 60,
                 }}
-                className="w-full text-left px-2.5 py-1.5 rounded-md text-xs text-[var(--muted)] hover:bg-[var(--surface-2)] transition"
+                className="overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl p-1.5"
+                onMouseDown={(e) => e.stopPropagation()}
               >
-                No link
-              </button>
-              {state.folders.length > 0 && (
-                <>
-                  <div className="h-px bg-[var(--border)] my-1" />
-                  <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
-                    Folders
-                  </div>
-                  {state.folders
-                    .filter((f) => matches(f.name))
-                    .map((f) => (
-                      <button
-                        key={`folder-${f.id}`}
-                        type="button"
-                        onClick={() => {
-                          setLinkedFolderId(f.id);
-                          setLinkedFileId(null);
-                          setLinkOpen(false);
-                        }}
-                        className="w-full text-left px-2.5 py-1.5 rounded-md text-xs hover:bg-[var(--surface-2)] transition truncate"
-                      >
-                        {folderPath(f.id)}
-                      </button>
-                    ))}
-                </>
-              )}
-              {state.files.length > 0 && (
-                <>
-                  <div className="h-px bg-[var(--border)] my-1" />
-                  <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
-                    Files
-                  </div>
-                  {state.files
-                    .filter((f) =>
-                      matches(`${f.title} ${folderPath(f.folderId)}`)
-                    )
-                    .map((f) => (
-                      <button
-                        key={`file-${f.id}`}
-                        type="button"
-                        onClick={() => {
-                          setLinkedFileId(f.id);
-                          setLinkedFolderId(null);
-                          setLinkOpen(false);
-                        }}
-                        className="w-full text-left px-2.5 py-1.5 rounded-md text-xs hover:bg-[var(--surface-2)] transition truncate"
-                      >
-                        {folderPath(f.folderId)} /{" "}
-                        {f.title.replace(/\.md$/i, "")}
-                      </button>
-                    ))}
-                </>
-              )}
-            </div>
-          )}
+                <input
+                  value={linkSearch}
+                  onChange={(e) => setLinkSearch(e.target.value)}
+                  placeholder="Search folders / files…"
+                  className="w-full bg-[var(--surface-2)] rounded-lg px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-[var(--accent)] mb-2"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLinkedFileId(null);
+                    setLinkedFolderId(null);
+                    setLinkOpen(false);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-md text-xs text-[var(--muted)] hover:bg-[var(--surface-2)] transition"
+                >
+                  No link
+                </button>
+                {state.folders.length > 0 && (
+                  <>
+                    <div className="h-px bg-[var(--border)] my-1" />
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
+                      Folders
+                    </div>
+                    {state.folders
+                      .filter((f) => matches(folderPath(f.id)))
+                      .map((f) => (
+                        <button
+                          key={`folder-${f.id}`}
+                          type="button"
+                          onClick={() => {
+                            setLinkedFolderId(f.id);
+                            setLinkedFileId(null);
+                            setLinkOpen(false);
+                          }}
+                          className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs hover:bg-[var(--surface-2)] transition truncate ${
+                            linkedFolderId === f.id ? "font-semibold" : ""
+                          }`}
+                        >
+                          {folderPath(f.id)}
+                        </button>
+                      ))}
+                  </>
+                )}
+                {state.files.length > 0 && (
+                  <>
+                    <div className="h-px bg-[var(--border)] my-1" />
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
+                      Files
+                    </div>
+                    {state.files
+                      .filter((f) =>
+                        matches(`${f.title} ${folderPath(f.folderId)}`)
+                      )
+                      .map((f) => (
+                        <button
+                          key={`file-${f.id}`}
+                          type="button"
+                          onClick={() => {
+                            setLinkedFileId(f.id);
+                            setLinkedFolderId(null);
+                            setLinkOpen(false);
+                          }}
+                          className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs hover:bg-[var(--surface-2)] transition truncate ${
+                            linkedFileId === f.id ? "font-semibold" : ""
+                          }`}
+                        >
+                          {folderPath(f.folderId)} /{" "}
+                          {f.title.replace(/\.md$/i, "")}
+                        </button>
+                      ))}
+                  </>
+                )}
+              </div>,
+              document.body
+            )}
         </div>
         {linkLabel && (
           <p className="mt-2 text-[11px] text-[var(--muted)]">

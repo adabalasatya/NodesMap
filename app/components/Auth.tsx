@@ -85,9 +85,12 @@ function SignInModal({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-center gap-2 mb-1">
-          <div className="size-8 rounded-full bg-[var(--accent)] grid place-items-center text-white font-semibold">
-            N
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/NodesMap_Icon.png"
+            alt="NodesMap"
+            className="size-8 rounded-full object-cover"
+          />
           <span className="font-semibold tracking-tight">NodesMap</span>
         </div>
         <h2 className="text-center text-lg font-semibold mt-3">
@@ -153,9 +156,12 @@ export default function Auth() {
       {/* Floating pill nav */}
       <header className="sticky top-4 z-40 mx-auto mt-4 flex max-w-3xl items-center justify-between gap-4 rounded-full border border-[var(--border)] bg-[var(--surface)]/80 px-3 py-2 pl-4 shadow-sm backdrop-blur">
         <div className="flex items-center gap-2">
-          <div className="size-7 rounded-full bg-[var(--accent)] grid place-items-center text-white font-semibold text-sm">
-            N
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/NodesMap_Icon.png"
+            alt="NodesMap"
+            className="size-7 rounded-full object-cover"
+          />
           <span className="font-semibold tracking-tight">NodesMap</span>
         </div>
         <nav className="flex items-center gap-1 text-sm">

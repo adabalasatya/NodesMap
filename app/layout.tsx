@@ -16,6 +16,11 @@ export const metadata: Metadata = {
   title: "NodesMap — Markdown notes & progress tracker",
   description:
     "Hierarchical markdown notes with completion tracking, progress analytics, and a radial mind-map view.",
+  icons: {
+    icon: "/NodesMap_Icon.png",
+    shortcut: "/NodesMap_Icon.png",
+    apple: "/NodesMap_Icon.png",
+  },
 };
 
 export default function RootLayout({

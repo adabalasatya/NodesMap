@@ -50,9 +50,12 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
       <div className="w-full max-w-md">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
-            <div className="size-8 rounded-full bg-[var(--foreground)] grid place-items-center text-[var(--surface)] font-semibold">
-              N
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/NodesMap_Icon.png"
+              alt="NodesMap"
+              className="size-8 rounded-full object-cover"
+            />
             <span className="font-semibold tracking-tight">NodesMap</span>
           </div>
           <button

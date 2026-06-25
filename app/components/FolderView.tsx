@@ -190,8 +190,19 @@ export default function FolderView() {
                     {sub.name}
                   </div>
                 </div>
-                <div className="mt-auto text-xs text-[var(--muted)] tabular-nums">
-                  {sp.done}/{sp.total} done
+                <div className="mt-auto">
+                  <div className="text-xs text-[var(--muted)] tabular-nums mb-1.5">
+                    {sp.done}/{sp.total} done
+                  </div>
+                  <div className="w-full h-1 rounded-full bg-[var(--surface-2)] overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-[width] duration-300"
+                      style={{
+                        width: `${sp.pct}%`,
+                        background: "var(--foreground)",
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
             );

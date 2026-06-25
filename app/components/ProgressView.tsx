@@ -267,9 +267,6 @@ function FolderTreeRow({
             }}
           />
         </span>
-        <span className="text-sm font-semibold tabular-nums w-12 text-right shrink-0">
-          {p.pct}%
-        </span>
         <span className="text-xs text-[var(--muted)] tabular-nums w-10 text-right shrink-0">
           {p.done}/{p.total}
         </span>

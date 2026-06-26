@@ -1,7 +1,7 @@
 "use client";
 
 import { useStore } from "../lib/store";
-import { CalendarIcon, ChartIcon, NetworkIcon } from "./icons";
+import { CalendarIcon, ChartIcon, FlameIcon, NetworkIcon } from "./icons";
 
 export default function TopBar() {
   const { state, dispatch } = useStore();
@@ -85,6 +85,17 @@ export default function TopBar() {
       <div className="min-w-0 flex-1">{crumbs}</div>
 
       <div className="ml-auto flex items-center gap-2 shrink-0">
+        {state.streak.count > 0 && (
+          <span
+            className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--surface-2)] text-xs text-[var(--muted)]"
+            title={`Current streak: ${state.streak.count} day${
+              state.streak.count === 1 ? "" : "s"
+            }`}
+          >
+            <FlameIcon size={13} />
+            <span className="tabular-nums">{state.streak.count}</span>
+          </span>
+        )}
         <button
           onClick={() =>
             dispatch({ type: "SET_VIEW", payload: { view: "planner" } })

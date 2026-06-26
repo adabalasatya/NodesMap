@@ -9,19 +9,24 @@ import {
 import type { Folder } from "../lib/types";
 import { useAuth } from "../lib/auth";
 import { deleteAccount } from "../lib/supabase";
+import { exportWorkspaceAsJson } from "../lib/export";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
   FileIcon,
   FolderIcon,
+  DownloadIcon,
   FolderPlusIcon,
   LogOutIcon,
+  MoonIcon,
   SearchIcon,
   SettingsIcon,
   SidebarCloseIcon,
   SidebarOpenIcon,
+  SunIcon,
   TrashIcon,
 } from "./icons";
+import { useTheme } from "../lib/theme";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import { useDialog } from "./Dialog";
 import { useLoading } from "./LoadingOverlay";
@@ -31,6 +36,7 @@ export default function Sidebar() {
   const { user, signOut } = useAuth();
   const dialog = useDialog();
   const loading = useLoading();
+  const { theme, toggle: toggleTheme } = useTheme();
   const [creating, setCreating] = useState<null | { parentId: string | null }>(
     null
   );
@@ -128,7 +134,18 @@ export default function Sidebar() {
     if (!term) return true;
     if (folder.name.toLowerCase().includes(term)) return true;
     const files = state.files.filter((f) => f.folderId === folder.id);
-    if (files.some((f) => f.title.toLowerCase().includes(term))) return true;
+    // Match a file by either its title OR the visible text in its body
+    // (strip HTML tags so the search term doesn't get diluted by markup).
+    if (
+      files.some((f) => {
+        if (f.title.toLowerCase().includes(term)) return true;
+        const bodyText = (f.content ?? "")
+          .replace(/<[^>]+>/g, " ")
+          .toLowerCase();
+        return bodyText.includes(term);
+      })
+    )
+      return true;
     return childrenOf(folder.id).some((c) => folderMatches(c, term));
   };
 
@@ -221,6 +238,33 @@ export default function Sidebar() {
                 },
               },
               {
+                label: folder.emoji ? "Change emoji" : "Set emoji",
+                onSelect: async () => {
+                  const emoji = await dialog.prompt({
+                    title: folder.emoji ? "Change emoji" : "Set emoji",
+                    message:
+                      "Pick a single emoji to mark this folder. Leave empty to remove.",
+                    placeholder: "📚",
+                    defaultValue: folder.emoji ?? "",
+                    okLabel: "Save",
+                  });
+                  if (emoji === null) return;
+                  // Keep only the first grapheme so a stray string can't bloat
+                  // the cell — emoji can be multi-codepoint.
+                  const trimmed = emoji.trim();
+                  const single =
+                    [...new Intl.Segmenter().segment(trimmed)][0]?.segment ??
+                    "";
+                  dispatch({
+                    type: "RENAME_FOLDER",
+                    payload: {
+                      id: folder.id,
+                      emoji: single ? single : null,
+                    },
+                  });
+                },
+              },
+              {
                 label: "Delete",
                 danger: true,
                 onSelect: async () => {
@@ -256,7 +300,16 @@ export default function Sidebar() {
               <ChevronRightIcon size={12} />
             )}
           </button>
-          <FolderIcon size={16} className="text-[var(--muted)]" />
+          {folder.emoji ? (
+            <span
+              className="shrink-0 w-4 grid place-items-center text-[14px] leading-none"
+              aria-hidden
+            >
+              {folder.emoji}
+            </span>
+          ) : (
+            <FolderIcon size={16} className="text-[var(--muted)]" />
+          )}
           <span
             className={`text-sm truncate flex-1 ${
               isSelected ? "font-medium" : ""
@@ -413,9 +466,17 @@ export default function Sidebar() {
           </span>
         </button>
         <button
+          onClick={toggleTheme}
+          aria-label="Toggle dark mode"
+          className="ml-auto p-1.5 rounded-lg border border-[var(--border)] hover:bg-[var(--surface-2)] text-[var(--muted)] hover:text-[var(--foreground)] transition"
+          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+        >
+          {theme === "dark" ? <SunIcon size={14} /> : <MoonIcon size={14} />}
+        </button>
+        <button
           onClick={() => setCollapsed(true)}
           aria-label="Collapse sidebar"
-          className="ml-auto p-1.5 rounded-lg border border-[var(--border)] hover:bg-[var(--surface-2)] text-[var(--muted)] hover:text-[var(--foreground)] transition"
+          className="p-1.5 rounded-lg border border-[var(--border)] hover:bg-[var(--surface-2)] text-[var(--muted)] hover:text-[var(--foreground)] transition"
           title="Collapse sidebar"
         >
           <SidebarCloseIcon size={14} />
@@ -518,6 +579,17 @@ export default function Sidebar() {
                 {userLabel}
               </div>
             </div>
+            <div className="h-px bg-[var(--border)] my-1" />
+            <button
+              onClick={() => {
+                setSettingsOpen(false);
+                exportWorkspaceAsJson(state);
+              }}
+              className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-sm text-[var(--foreground)] hover:bg-[var(--surface-2)] transition"
+            >
+              <DownloadIcon size={14} />
+              Export workspace (JSON)
+            </button>
             <div className="h-px bg-[var(--border)] my-1" />
             <button
               onClick={async () => {

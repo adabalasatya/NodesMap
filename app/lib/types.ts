@@ -2,6 +2,8 @@ export interface Folder {
   id: string;
   name: string;
   color: string;
+  /** Optional emoji shown next to / replacing the folder icon. */
+  emoji?: string | null;
   createdAt: number;
   parentId?: string | null;
 }
@@ -36,6 +38,9 @@ export interface Task {
   startDate: string; // YYYY-MM-DD
   time?: string; // HH:MM (24h)
   repeat: RepeatKind;
+  /** For `repeat === "weekly"`, the specific weekdays (0=Sun … 6=Sat).
+   *  Empty array falls back to "same weekday as startDate" for back-compat. */
+  weekdays?: number[];
   linkedFileId?: string | null;
   linkedFolderId?: string | null;
   /** Dates (YYYY-MM-DD) where this task has been ticked. */

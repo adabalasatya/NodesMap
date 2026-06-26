@@ -16,6 +16,7 @@ import Auth from "./Auth";
 import Onboarding, { onboardingKey } from "./Onboarding";
 import { DialogProvider } from "./Dialog";
 import { LoadingOverlayProvider } from "./LoadingOverlay";
+import QuickAdd from "./QuickAdd";
 
 function Workspace() {
   const { state } = useStore();
@@ -68,6 +69,7 @@ function App() {
         <Sidebar />
         <Workspace />
       </div>
+      <QuickAdd />
     </StoreProvider>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "../lib/auth";
+import { errorMessage } from "../lib/errors";
 import { GoogleIcon } from "./icons";
 
 const SUPPORT_URL = "https://x.com/NodesMap";
@@ -31,18 +32,6 @@ const SHOWCASE = [
   },
 ];
 
-function extractMessage(e: unknown): string {
-  if (typeof e === "string") return e;
-  if (e instanceof Error) return e.message;
-  if (e && typeof e === "object") {
-    const o = e as Record<string, unknown>;
-    if (typeof o.message === "string") return o.message;
-    if (typeof o.error_description === "string")
-      return o.error_description as string;
-  }
-  return String(e ?? "Unknown error");
-}
-
 function XGlyph() {
   return (
     <svg
@@ -69,7 +58,7 @@ function SignInModal({ onClose }: { onClose: () => void }) {
       await signInWithGoogle();
       // On success the browser is redirected to Google, so we stay "busy".
     } catch (err) {
-      setError(extractMessage(err));
+      setError(errorMessage(err));
       setBusy(false);
     }
   };

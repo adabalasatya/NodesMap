@@ -99,7 +99,13 @@ export default function Dashboard() {
                 }}
                 className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] cursor-pointer transition"
               >
-                <FolderIcon size={18} className="text-[var(--muted)]" />
+                {folder.emoji ? (
+                  <span className="text-lg leading-none" aria-hidden>
+                    {folder.emoji}
+                  </span>
+                ) : (
+                  <FolderIcon size={18} className="text-[var(--muted)]" />
+                )}
                 <div className="font-medium">{folder.name}</div>
                 <div className="text-xs text-[var(--muted)]">
                   {done}/{total} done
@@ -137,7 +143,13 @@ export default function Dashboard() {
             >
               <div className="flex flex-col items-center text-center gap-2">
                 <div className="size-14 rounded-xl grid place-items-center mb-2 bg-[var(--surface-2)] text-[var(--muted)]">
-                  <FolderIcon size={28} />
+                  {folder.emoji ? (
+                    <span className="text-3xl leading-none" aria-hidden>
+                      {folder.emoji}
+                    </span>
+                  ) : (
+                    <FolderIcon size={28} />
+                  )}
                 </div>
                 <div className="font-semibold">{folder.name}</div>
                 <div className="text-xs text-[var(--muted)]">

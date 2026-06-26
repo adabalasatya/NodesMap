@@ -219,7 +219,13 @@ export default function FolderView() {
                 className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] p-5 min-h-[140px] flex flex-col cursor-pointer transition"
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <FolderIcon size={20} className="text-[var(--muted)]" />
+                  {sub.emoji ? (
+                    <span className="text-lg leading-none" aria-hidden>
+                      {sub.emoji}
+                    </span>
+                  ) : (
+                    <FolderIcon size={20} className="text-[var(--muted)]" />
+                  )}
                   <div className="font-semibold text-base flex-1">
                     {sub.name}
                   </div>

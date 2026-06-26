@@ -13,10 +13,12 @@ import { useAuth } from "../lib/auth";
 import { renderMarkdown } from "../lib/markdown";
 import { clearDraft, readDraft, writeDraft } from "../lib/draftSync";
 import { hasSupabaseConfig, upsertFile } from "../lib/supabase";
+import { exportNoteAsMarkdown } from "../lib/export";
 import {
   ArrowDownIcon,
   CheckIcon,
   ChevronLeftIcon,
+  DownloadIcon,
   TrashIcon,
 } from "./icons";
 
@@ -599,6 +601,38 @@ export default function Editor() {
          list and starts a new paragraph). --- */
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
+      // Keyboard shortcuts ----------------------------------------------
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod) {
+        const k = e.key.toLowerCase();
+        if (k === "b") {
+          e.preventDefault();
+          toggleBold();
+          return;
+        }
+        if (k === "i") {
+          e.preventDefault();
+          toggleItalic();
+          return;
+        }
+        if (k === "1" || k === "2" || k === "3") {
+          e.preventDefault();
+          applyHeading(`h${k}` as "h1" | "h2" | "h3");
+          return;
+        }
+        if (k === "s") {
+          // Manual "save" — flush whatever's pending right now.
+          e.preventDefault();
+          if (file) {
+            void syncToServer(
+              file.id,
+              editorRef.current?.innerHTML ?? ""
+            ).then((ok) => setStatus(ok ? "saved" : "failed"));
+          }
+          return;
+        }
+      }
+
       if (e.key !== "Enter") return;
       const el = editorRef.current;
       if (!el) return;
@@ -660,7 +694,15 @@ export default function Editor() {
         return;
       }
     },
-    [flush, updateFormats]
+    [
+      flush,
+      updateFormats,
+      toggleBold,
+      toggleItalic,
+      applyHeading,
+      file,
+      syncToServer,
+    ]
   );
 
   /* Background click in the editor — place the caret where the user
@@ -844,6 +886,17 @@ export default function Editor() {
           >
             <CheckIcon size={14} />
             {file.isCompleted ? "Completed" : "Mark done"}
+          </button>
+          <button
+            onClick={() => {
+              const folderName = folder?.name;
+              exportNoteAsMarkdown(file, folderName);
+            }}
+            className="p-2 rounded-xl border border-[var(--border)] hover:bg-[var(--surface-2)] text-[var(--muted)] hover:text-[var(--foreground)] transition"
+            aria-label="Download as Markdown"
+            title="Download as Markdown"
+          >
+            <DownloadIcon size={14} />
           </button>
           <button
             onClick={async () => {

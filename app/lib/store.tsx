@@ -21,13 +21,19 @@ import { FOLDER_COLORS } from "./types";
 import {
   deleteFileRemote,
   deleteFolderRemote,
+  deleteTaskRemote,
   fetchFiles,
   fetchFolders,
+  fetchTasks,
   hasSupabaseConfig,
+  tasksSyncAvailable,
   upsertFile,
   upsertFolder,
+  upsertTask,
 } from "./supabase";
 import { useAuth } from "./auth";
+import { errorMessage } from "./errors";
+import { setDraftUser } from "./draftSync";
 
 const STORAGE_PREFIX = "noteflow_state_v1";
 const storageKey = (userId: string | null) =>
@@ -78,12 +84,19 @@ export type SyncStatus =
 
 export type Action =
   | { type: "HYDRATE"; payload: AppState }
-  | { type: "MERGE_REMOTE"; payload: { folders: Folder[]; files: NoteFile[] } }
+  | { type: "RESET" }
+  | {
+      type: "MERGE_REMOTE";
+      payload: { folders: Folder[]; files: NoteFile[]; tasks?: Task[] };
+    }
   | {
       type: "ADD_FOLDER";
       payload: { name: string; color?: string; parentId?: string | null };
     }
-  | { type: "RENAME_FOLDER"; payload: { id: string; name: string } }
+  | {
+      type: "RENAME_FOLDER";
+      payload: { id: string; name?: string; emoji?: string | null };
+    }
   | {
       type: "MOVE_FOLDER";
       payload: { id: string; parentId: string | null };
@@ -125,29 +138,14 @@ export type Action =
       payload: {
         id: string;
         title?: string;
+        startDate?: string;
         time?: string | undefined;
         repeat?: RepeatKind;
+        weekdays?: number[];
         linkedFileId?: string | null;
         linkedFolderId?: string | null;
       };
     };
-
-function errorMessage(e: unknown): string {
-  if (typeof e === "string") return e;
-  if (e instanceof Error) return e.message;
-  if (e && typeof e === "object") {
-    const o = e as Record<string, unknown>;
-    if (typeof o.message === "string") return o.message;
-    if (typeof o.error_description === "string")
-      return o.error_description as string;
-    try {
-      return JSON.stringify(e);
-    } catch {
-      return "Unknown error";
-    }
-  }
-  return String(e ?? "Unknown error");
-}
 
 function dayOfWeek(ymd: string): number {
   const [y, m, d] = ymd.split("-").map(Number);
@@ -158,8 +156,11 @@ export function taskShowsOn(task: Task, date: string): boolean {
   if (task.startDate > date) return false;
   if (task.repeat === "once") return task.startDate === date;
   if (task.repeat === "daily") return true;
-  if (task.repeat === "weekly")
-    return dayOfWeek(task.startDate) === dayOfWeek(date);
+  if (task.repeat === "weekly") {
+    const dow = dayOfWeek(date);
+    if (task.weekdays && task.weekdays.length > 0) return task.weekdays.includes(dow);
+    return dayOfWeek(task.startDate) === dow;
+  }
   return false;
 }
 
@@ -238,12 +239,13 @@ function reducer(state: AppState, action: Action): AppState {
     case "HYDRATE":
       return { ...state, ...action.payload };
 
+    case "RESET":
+      return { ...initialState };
+
     case "MERGE_REMOTE": {
       const folders = mergeById(state.folders, action.payload.folders).map(
         (merged) => {
           if (merged.parentId !== undefined) return merged;
-          // Incoming row lacked a parent_id (column missing in DB or omitted
-          // from select). Preserve any local parentId we already had.
           const local = state.folders.find((f) => f.id === merged.id);
           if (local && local.parentId !== undefined) {
             return { ...merged, parentId: local.parentId };
@@ -255,6 +257,9 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         folders,
         files: mergeById(state.files, action.payload.files),
+        tasks: action.payload.tasks
+          ? mergeById(state.tasks, action.payload.tasks)
+          : state.tasks,
       };
     }
 
@@ -276,15 +281,19 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, folders: [...state.folders, folder] };
     }
 
-    case "RENAME_FOLDER":
+    case "RENAME_FOLDER": {
+      const { id, name, emoji } = action.payload;
       return {
         ...state,
-        folders: state.folders.map((f) =>
-          f.id === action.payload.id
-            ? { ...f, name: action.payload.name.trim() || f.name }
-            : f
-        ),
+        folders: state.folders.map((f) => {
+          if (f.id !== id) return f;
+          const next = { ...f };
+          if (typeof name === "string" && name.trim()) next.name = name.trim();
+          if (emoji !== undefined) next.emoji = emoji;
+          return next;
+        }),
       };
+    }
 
     case "MOVE_FOLDER": {
       const { id, parentId } = action.payload;
@@ -511,22 +520,53 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const syncedRef = useRef<{
     folders: Map<string, Folder>;
     files: Map<string, NoteFile>;
-  }>({ folders: new Map(), files: new Map() });
+    tasks: Map<string, Task>;
+  }>({ folders: new Map(), files: new Map(), tasks: new Map() });
   const [retryNonce, setRetryNonce] = useState(0);
+  const prevUserIdRef = useRef<string | null>(null);
+
+  // 0) When the signed-in user changes (sign-out / switch), clear the
+  //    in-memory reducer so the previous user's data never flashes.
+  useEffect(() => {
+    setDraftUser(userId);
+    if (prevUserIdRef.current !== userId) {
+      if (prevUserIdRef.current !== null) {
+        dispatch({ type: "RESET" });
+      }
+      prevUserIdRef.current = userId;
+    }
+  }, [userId]);
 
   // 1) Hydrate from localStorage (or seed) - per user namespace
   useEffect(() => {
     if (typeof window === "undefined") return;
     setHydrated(false);
     setPullReady(false);
-    syncedRef.current = { folders: new Map(), files: new Map() };
+    syncedRef.current = {
+      folders: new Map(),
+      files: new Map(),
+      tasks: new Map(),
+    };
     try {
       const raw = localStorage.getItem(storageKey(userId));
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<AppState>;
+        // Persisted `view` / `currentFolderId` / `currentFileId` carry the
+        // user back to where they left off, but if the persisted view was
+        // `editor` we still need a folderId; fall back to dashboard when
+        // the referenced ids no longer exist (e.g. file was deleted).
+        const persistedFolderId = parsed.currentFolderId ?? null;
+        const persistedFileId = parsed.currentFileId ?? null;
+        const persistedView = parsed.view ?? "dashboard";
         dispatch({
           type: "HYDRATE",
-          payload: { ...initialState, ...parsed, view: "dashboard" },
+          payload: {
+            ...initialState,
+            ...parsed,
+            view: persistedView,
+            currentFolderId: persistedFolderId,
+            currentFileId: persistedFileId,
+          },
         });
       } else {
         const sampleFolderId = newId();
@@ -568,6 +608,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         tasks: state.tasks,
         viewMode: state.viewMode,
         streak: state.streak,
+        view: state.view,
+        currentFolderId: state.currentFolderId,
+        currentFileId: state.currentFileId,
       };
       localStorage.setItem(storageKey(userId), JSON.stringify(persisted));
     } catch {}
@@ -577,6 +620,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     state.tasks,
     state.viewMode,
     state.streak,
+    state.view,
+    state.currentFolderId,
+    state.currentFileId,
     hydrated,
     userId,
   ]);
@@ -593,18 +639,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const [remoteFolders, remoteFiles] = await Promise.all([
+        const [remoteFolders, remoteFiles, remoteTasks] = await Promise.all([
           fetchFolders(),
           fetchFiles(),
+          fetchTasks(),
         ]);
         if (cancelled) return;
         dispatch({
           type: "MERGE_REMOTE",
-          payload: { folders: remoteFolders, files: remoteFiles },
+          payload: {
+            folders: remoteFolders,
+            files: remoteFiles,
+            tasks: remoteTasks,
+          },
         });
         syncedRef.current = {
           folders: new Map(remoteFolders.map((f) => [f.id, f])),
           files: new Map(remoteFiles.map((f) => [f.id, f])),
+          tasks: new Map(remoteTasks.map((t) => [t.id, t])),
         };
         setPullReady(true);
         setSync("connected");
@@ -627,8 +679,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     const currFolders = new Map(state.folders.map((f) => [f.id, f]));
     const currFiles = new Map(state.files.map((f) => [f.id, f]));
+    const currTasks = new Map(state.tasks.map((t) => [t.id, t]));
     const synced = syncedRef.current;
-    const tasks: Promise<unknown>[] = [];
+    const jobs: Promise<unknown>[] = [];
 
     currFolders.forEach((f) => {
       const prev = synced.folders.get(f.id);
@@ -636,35 +689,60 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         !prev ||
         prev.name !== f.name ||
         prev.color !== f.color ||
+        (prev.emoji ?? null) !== (f.emoji ?? null) ||
         (prev.parentId ?? null) !== (f.parentId ?? null)
       )
-        tasks.push(upsertFolder(f));
+        jobs.push(upsertFolder(f));
     });
     synced.folders.forEach((_, id) => {
-      if (!currFolders.has(id)) tasks.push(deleteFolderRemote(id));
+      if (!currFolders.has(id)) jobs.push(deleteFolderRemote(id));
     });
     currFiles.forEach((f) => {
       const prev = synced.files.get(f.id);
-      // Content sync is owned by the Editor (30s debounce + draft layer in
+      // Content sync is owned by the Editor (debounce + draft layer in
       // app/lib/draftSync.ts). Only metadata changes trigger an immediate
-      // upsert here — content travels with whatever metadata push fires.
+      // upsert here.
       if (
         !prev ||
         prev.title !== f.title ||
         prev.isCompleted !== f.isCompleted ||
         prev.folderId !== f.folderId
       )
-        tasks.push(upsertFile(f));
+        jobs.push(upsertFile(f));
     });
     synced.files.forEach((_, id) => {
-      if (!currFiles.has(id)) tasks.push(deleteFileRemote(id));
+      if (!currFiles.has(id)) jobs.push(deleteFileRemote(id));
     });
+    if (tasksSyncAvailable()) {
+      currTasks.forEach((t) => {
+        const prev = synced.tasks.get(t.id);
+        if (
+          !prev ||
+          prev.title !== t.title ||
+          prev.startDate !== t.startDate ||
+          (prev.time ?? null) !== (t.time ?? null) ||
+          prev.repeat !== t.repeat ||
+          JSON.stringify(prev.weekdays ?? []) !==
+            JSON.stringify(t.weekdays ?? []) ||
+          (prev.linkedFileId ?? null) !== (t.linkedFileId ?? null) ||
+          (prev.linkedFolderId ?? null) !== (t.linkedFolderId ?? null) ||
+          JSON.stringify(prev.completedDates) !==
+            JSON.stringify(t.completedDates) ||
+          JSON.stringify(prev.autoCompletedDates) !==
+            JSON.stringify(t.autoCompletedDates)
+        )
+          jobs.push(upsertTask(t));
+      });
+      synced.tasks.forEach((_, id) => {
+        if (!currTasks.has(id)) jobs.push(deleteTaskRemote(id));
+      });
+    }
 
-    if (tasks.length === 0) return;
+    if (jobs.length === 0) return;
 
     setSync("syncing");
     setSyncError(null);
-    Promise.allSettled(tasks).then((results) => {
+    Promise.allSettled(jobs).then((results) => {
       const rejected = results.filter(
         (r) => r.status === "rejected"
       ) as PromiseRejectedResult[];
@@ -676,9 +754,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       } else {
         setSync("connected");
       }
-      syncedRef.current = { folders: currFolders, files: currFiles };
+      syncedRef.current = {
+        folders: currFolders,
+        files: currFiles,
+        tasks: currTasks,
+      };
     });
-  }, [state.folders, state.files, pullReady]);
+  }, [state.folders, state.files, state.tasks, pullReady]);
 
   const value = useMemo(
     () => ({

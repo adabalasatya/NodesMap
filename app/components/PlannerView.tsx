@@ -8,6 +8,7 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  ClockIcon,
   LinkIcon,
   PlusIcon,
   TrashIcon,
@@ -212,6 +213,20 @@ export default function PlannerView() {
                   dispatch({
                     type: "TOGGLE_TASK_DONE",
                     payload: { id: task.id, date: selectedDate },
+                  })
+                }
+                onSnooze={() =>
+                  dispatch({
+                    type: "UPDATE_TASK",
+                    payload: {
+                      id: task.id,
+                      startDate: shiftDays(
+                        task.startDate >= selectedDate
+                          ? task.startDate
+                          : selectedDate,
+                        1
+                      ),
+                    },
                   })
                 }
                 onDelete={() =>
@@ -419,12 +434,14 @@ function TaskRow({
   date,
   done,
   onToggle,
+  onSnooze,
   onDelete,
 }: {
   task: Task;
   date: string;
   done: boolean;
   onToggle: () => void;
+  onSnooze?: () => void;
   onDelete: () => void;
 }) {
   const { state, dispatch } = useStore();
@@ -492,6 +509,16 @@ function TaskRow({
           )}
         </div>
       </div>
+      {onSnooze && !done && (
+        <button
+          onClick={onSnooze}
+          className="shrink-0 p-1.5 rounded-lg text-[var(--muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition"
+          aria-label="Snooze to tomorrow"
+          title="Snooze to tomorrow"
+        >
+          <ClockIcon size={13} />
+        </button>
+      )}
       <button
         onClick={onDelete}
         className="shrink-0 p-1.5 rounded-lg text-[var(--muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--danger)] hover:bg-[var(--surface-2)] transition"

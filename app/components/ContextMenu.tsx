@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export interface MenuItem {
   label: string;
@@ -33,14 +33,35 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
     };
   }, [onClose]);
 
-  const left = Math.min(x, typeof window !== "undefined" ? window.innerWidth - 200 : x);
-  const top = Math.min(y, typeof window !== "undefined" ? window.innerHeight - items.length * 36 - 16 : y);
+  // Measure the actual rendered menu, then clamp to the viewport with an
+  // 8px gutter. Done as a layout effect (post-paint) so we read real sizes
+  // instead of guessing from `items.length`.
+  const [pos, setPos] = useState<{ left: number; top: number }>({
+    left: x,
+    top: y,
+  });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || typeof window === "undefined") return;
+    const w = el.offsetWidth || 200;
+    const h = el.offsetHeight || items.length * 36 + 8;
+    const gutter = 8;
+    const left = Math.max(
+      gutter,
+      Math.min(x, window.innerWidth - w - gutter)
+    );
+    const top = Math.max(
+      gutter,
+      Math.min(y, window.innerHeight - h - gutter)
+    );
+    setPos({ left, top });
+  }, [x, y, items.length]);
 
   return (
     <div
       ref={ref}
       className="fixed z-50 min-w-[160px] rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-lg py-1 fade-in"
-      style={{ left, top }}
+      style={{ left: pos.left, top: pos.top }}
       onClick={(e) => e.stopPropagation()}
     >
       {items.map((item, i) => (

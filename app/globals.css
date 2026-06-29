@@ -16,14 +16,17 @@
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --background: #0b0b0d;
-  --foreground: #f5f5f6;
-  --surface: #15151a;
-  --surface-2: #1f1f24;
-  --surface-3: #2a2a31;
-  --border: #2a2a31;
-  --muted: #9aa0a6;
-  --accent: #f5f5f6;
+  /* Pure neutral grayscale — no blue/red cast. R = G = B at every step
+     so the sidebar, top bar and folder cards read as true black/grey
+     instead of looking slightly blue. */
+  --background: #0a0a0a;
+  --foreground: #f5f5f5;
+  --surface: #141414;
+  --surface-2: #1e1e1e;
+  --surface-3: #282828;
+  --border: #282828;
+  --muted: #9a9a9a;
+  --accent: #f5f5f5;
   --success: #e0e0e0;
   --danger: #ff6b6b;
 }

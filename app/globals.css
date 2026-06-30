@@ -2,12 +2,16 @@
 
 :root {
   color-scheme: light;
+  /* Background is pure white; surface sits one step away as a soft-grey
+     "card" layer for the sidebar, top header and folder cards — same
+     visual rhythm as dark mode where surface is one step lighter than
+     background. Hover/active states use surface-2, one more step out. */
   --background: #ffffff;
   --foreground: #0a0a0a;
-  --surface: #ffffff;
-  --surface-2: #f4f4f5;
-  --surface-3: #e9e9eb;
-  --border: #e5e5e7;
+  --surface: #f4f4f5;
+  --surface-2: #e9e9eb;
+  --surface-3: #dcdce0;
+  --border: #d4d4d8;
   --muted: #6b7280;
   --accent: #111111;
   --success: #2a2a2a;

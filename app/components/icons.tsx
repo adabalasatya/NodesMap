@@ -142,6 +142,37 @@ export const CalendarIcon = (p: Props) => (
     <path d="M8 3v4M16 3v4" />
   </svg>
 );
+export const TimerIcon = (p: Props) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="13" r="8" />
+    <path d="M12 9v4l2.5 2.5" />
+    <path d="M9 2h6" />
+  </svg>
+);
+export const PlayIcon = (p: Props) => (
+  <svg {...base(p)} fill="currentColor" stroke="none">
+    <path d="M6 4v16l14-8z" />
+  </svg>
+);
+export const PauseIcon = (p: Props) => (
+  <svg {...base(p)} fill="currentColor" stroke="none">
+    <rect x="6" y="4" width="4" height="16" rx="1" />
+    <rect x="14" y="4" width="4" height="16" rx="1" />
+  </svg>
+);
+export const RotateCcwIcon = (p: Props) => (
+  <svg {...base(p)}>
+    <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+    <path d="M3 3v5h5" />
+  </svg>
+);
+export const SpeakerIcon = (p: Props) => (
+  <svg {...base(p)}>
+    <path d="M11 5 6 9H2v6h4l5 4z" />
+    <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+    <path d="M19 5a10 10 0 0 1 0 14" />
+  </svg>
+);
 export const FlameIcon = (p: Props) => (
   <svg {...base(p)}>
     <path d="M12 2s5 6 5 11a5 5 0 0 1-10 0c0-2 1-4 3-6-1 4 2 4 2 4s-2-3 0-9z" />

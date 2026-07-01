@@ -2,6 +2,7 @@
 
 import { useStore } from "../lib/store";
 import { CalendarIcon, ChartIcon, FlameIcon, NetworkIcon } from "./icons";
+import PomodoroTimer from "./PomodoroTimer";
 
 export default function TopBar() {
   const { state, dispatch } = useStore();
@@ -81,8 +82,14 @@ export default function TopBar() {
   }
 
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-2 px-6 py-4 border-b border-[var(--border)] bg-[var(--surface)]/80 backdrop-blur">
+    <div className="sticky top-0 z-10 flex items-center gap-2 px-6 py-4 border-b border-[var(--border)] bg-[var(--surface)]/80 backdrop-blur relative">
       <div className="min-w-0 flex-1">{crumbs}</div>
+
+      {/* Pomodoro timer — absolute-centered so it stays in the middle
+          regardless of how long the breadcrumb / nav sides get. */}
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shrink-0">
+        <PomodoroTimer />
+      </div>
 
       <div className="ml-auto flex items-center gap-2 shrink-0">
         {state.streak.count > 0 && (

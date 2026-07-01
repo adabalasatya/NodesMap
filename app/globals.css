@@ -8,10 +8,12 @@
      background. Hover/active states use surface-2, one more step out. */
   --background: #ffffff;
   --foreground: #0a0a0a;
-  --surface: #f4f4f5;
-  --surface-2: #e9e9eb;
-  --surface-3: #dcdce0;
-  --border: #d4d4d8;
+  /* Soft-grey layers dialled back ~40% from the previous step so cards
+     read as a gentle tint rather than a pronounced fill. */
+  --surface: #f8f8f8;
+  --surface-2: #f0f0f0;
+  --surface-3: #e6e6e6;
+  --border: #dcdcdc;
   --muted: #6b7280;
   --accent: #111111;
   --success: #2a2a2a;

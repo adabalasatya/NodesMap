@@ -1,0 +1,546 @@
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
+import {
+  PauseIcon,
+  PlayIcon,
+  RotateCcwIcon,
+  SpeakerIcon,
+  TimerIcon,
+} from "./icons";
+
+type Mode = "focus" | "shortBreak" | "longBreak";
+
+type Settings = {
+  focusMin: number;
+  shortBreakMin: number;
+  longBreakMin: number;
+  autoStartBreaks: boolean;
+  autoStartPomodoros: boolean;
+  longBreakInterval: number; // every N focus sessions
+  alarmSound: string;
+  alarmVolume: number; // 0..100
+};
+
+const DEFAULTS: Settings = {
+  focusMin: 25,
+  shortBreakMin: 5,
+  longBreakMin: 15,
+  autoStartBreaks: false,
+  autoStartPomodoros: false,
+  longBreakInterval: 4,
+  alarmSound: "chime",
+  alarmVolume: 60,
+};
+
+const STORAGE_KEY = "noteflow_pomodoro_settings";
+const SOUNDS = ["chime", "bell", "digital", "kitchen"];
+
+function fmt(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function loadSettings(): Settings {
+  if (typeof window === "undefined") return DEFAULTS;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULTS;
+    const parsed = JSON.parse(raw) as Partial<Settings>;
+    return { ...DEFAULTS, ...parsed };
+  } catch {
+    return DEFAULTS;
+  }
+}
+
+function saveSettings(s: Settings) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  } catch {}
+}
+
+/** Beep tones for the built-in alarms via WebAudio (no assets needed). */
+function playAlarm(sound: string, volume: number) {
+  if (typeof window === "undefined") return;
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
+    const ctx = new AudioCtx();
+    const gain = ctx.createGain();
+    gain.gain.value = Math.max(0, Math.min(1, volume / 100));
+    gain.connect(ctx.destination);
+    const now = ctx.currentTime;
+
+    const beep = (
+      freq: number,
+      start: number,
+      dur = 0.18,
+      type: OscillatorType = "sine"
+    ) => {
+      const osc = ctx.createOscillator();
+      osc.type = type;
+      osc.frequency.value = freq;
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      g.gain.linearRampToValueAtTime(1, now + start + 0.005);
+      g.gain.linearRampToValueAtTime(0, now + start + dur);
+      osc.connect(g).connect(gain);
+      osc.start(now + start);
+      osc.stop(now + start + dur + 0.02);
+    };
+
+    switch (sound) {
+      case "bell":
+        beep(880, 0, 0.25, "triangle");
+        beep(660, 0.28, 0.35, "triangle");
+        break;
+      case "digital":
+        beep(1200, 0, 0.12, "square");
+        beep(1200, 0.18, 0.12, "square");
+        beep(1200, 0.36, 0.12, "square");
+        break;
+      case "kitchen":
+        beep(1400, 0, 0.08, "square");
+        beep(1400, 0.15, 0.08, "square");
+        beep(1400, 0.3, 0.08, "square");
+        beep(1400, 0.45, 0.08, "square");
+        break;
+      default:
+        beep(660, 0, 0.2);
+        beep(880, 0.22, 0.3);
+        break;
+    }
+    setTimeout(() => ctx.close().catch(() => {}), 1200);
+  } catch {
+    // ignore audio failures (autoplay policies etc.)
+  }
+}
+
+function modeSeconds(mode: Mode, s: Settings): number {
+  if (mode === "focus") return s.focusMin * 60;
+  if (mode === "shortBreak") return s.shortBreakMin * 60;
+  return s.longBreakMin * 60;
+}
+
+export default function PomodoroTimer() {
+  const [settings, setSettings] = useState<Settings>(DEFAULTS);
+  const [mode, setMode] = useState<Mode>("focus");
+  const [remaining, setRemaining] = useState<number>(DEFAULTS.focusMin * 60);
+  const [running, setRunning] = useState(false);
+  const [completedFocus, setCompletedFocus] = useState(0);
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const [pos, setPos] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
+
+  // Hydrate settings & seed remaining once on mount.
+  useEffect(() => {
+    const s = loadSettings();
+    setSettings(s);
+    setRemaining(s.focusMin * 60);
+  }, []);
+
+  // Persist settings whenever they change (after first mount).
+  const hydrated = useRef(false);
+  useEffect(() => {
+    if (!hydrated.current) {
+      hydrated.current = true;
+      return;
+    }
+    saveSettings(settings);
+    // If not running, adjust the visible time to reflect the new mode length.
+    if (!running) setRemaining(modeSeconds(mode, settings));
+  }, [settings, mode, running]);
+
+  // Countdown tick.
+  useEffect(() => {
+    if (!running) return;
+    const id = window.setInterval(() => {
+      setRemaining((r) => (r > 0 ? r - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [running]);
+
+  // End-of-session handling.
+  useEffect(() => {
+    if (remaining > 0 || !running) return;
+    setRunning(false);
+    playAlarm(settings.alarmSound, settings.alarmVolume);
+    if (mode === "focus") {
+      const next = completedFocus + 1;
+      setCompletedFocus(next);
+      const isLong = next % settings.longBreakInterval === 0;
+      const nextMode: Mode = isLong ? "longBreak" : "shortBreak";
+      setMode(nextMode);
+      setRemaining(modeSeconds(nextMode, settings));
+      if (settings.autoStartBreaks) setRunning(true);
+    } else {
+      setMode("focus");
+      setRemaining(modeSeconds("focus", settings));
+      if (settings.autoStartPomodoros) setRunning(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remaining]);
+
+  const start = () => setRunning(true);
+  const pause = () => setRunning(false);
+  const reset = useCallback(() => {
+    setRunning(false);
+    setRemaining(modeSeconds(mode, settings));
+  }, [mode, settings]);
+
+  const switchMode = (m: Mode) => {
+    setMode(m);
+    setRunning(false);
+    setRemaining(modeSeconds(m, settings));
+  };
+
+  // Measure trigger button so the popover can float via portal without
+  // being clipped by the sticky TopBar's stacking / overflow.
+  useEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const b = buttonRef.current;
+      if (!b) return;
+      const r = b.getBoundingClientRect();
+      setPos({
+        top: r.bottom + 8,
+        left: r.left + r.width / 2,
+        width: r.width,
+      });
+    };
+    measure();
+    const away = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (buttonRef.current?.contains(target)) return;
+      const pop = document.getElementById("__pomodoro-pop");
+      if (pop && pop.contains(target)) return;
+      setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  const modeLabel = useMemo(
+    () =>
+      mode === "focus"
+        ? "Focus"
+        : mode === "shortBreak"
+        ? "Short break"
+        : "Long break",
+    [mode]
+  );
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        onClick={() => setOpen((v) => !v)}
+        className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium tabular-nums transition ${
+          running
+            ? "border-[var(--foreground)] bg-[var(--foreground)] text-[var(--surface)]"
+            : "border-[var(--border)] hover:bg-[var(--surface-2)]"
+        }`}
+        title={`${modeLabel} · ${fmt(remaining)}`}
+        aria-expanded={open}
+      >
+        <TimerIcon size={14} />
+        <span>{fmt(remaining)}</span>
+      </button>
+
+      {open &&
+        pos &&
+        typeof window !== "undefined" &&
+        createPortal(
+          <div
+            id="__pomodoro-pop"
+            style={{
+              position: "fixed",
+              top: pos.top,
+              left: pos.left,
+              transform: "translateX(-50%)",
+              width: 400,
+              maxHeight: "min(80vh, 640px)",
+              zIndex: 60,
+            }}
+            className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl overflow-y-auto modal-pop"
+          >
+            {/* Header: mode switcher + countdown + controls */}
+            <div className="px-5 pt-5">
+              <div className="inline-flex w-full rounded-xl border border-[var(--border)] p-1">
+                {(
+                  [
+                    { m: "focus" as const, label: "Focus" },
+                    { m: "shortBreak" as const, label: "Break" },
+                    { m: "longBreak" as const, label: "Long break" },
+                  ]
+                ).map(({ m, label }) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => switchMode(m)}
+                    className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                      mode === m
+                        ? "bg-[var(--foreground)] text-[var(--surface)]"
+                        : "text-[var(--muted)] hover:text-[var(--foreground)]"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="text-5xl font-bold tabular-nums text-center mt-5">
+                {fmt(remaining)}
+              </div>
+              <div className="text-xs text-center text-[var(--muted)] mt-1 mb-4">
+                Session #{completedFocus + (mode === "focus" ? 1 : 0)} · long
+                break every {settings.longBreakInterval}
+              </div>
+
+              <div className="flex items-center justify-center gap-2 mb-5">
+                {running ? (
+                  <button
+                    onClick={pause}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--foreground)] text-[var(--surface)] text-sm font-medium hover:opacity-90 transition"
+                  >
+                    <PauseIcon size={14} /> Pause
+                  </button>
+                ) : (
+                  <button
+                    onClick={start}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--foreground)] text-[var(--surface)] text-sm font-medium hover:opacity-90 transition"
+                  >
+                    <PlayIcon size={14} /> Start
+                  </button>
+                )}
+                <button
+                  onClick={reset}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--border)] hover:bg-[var(--surface-2)] text-sm transition"
+                >
+                  <RotateCcwIcon size={14} /> Reset
+                </button>
+              </div>
+            </div>
+
+            {/* Timer section */}
+            <div className="border-t border-[var(--border)] px-5 py-4">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-[var(--muted)] mb-3">
+                <TimerIcon size={12} /> Timer
+              </div>
+
+              <label className="block text-sm font-medium mb-2">
+                Time (minutes)
+              </label>
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                <NumField
+                  label="Pomodoro"
+                  value={settings.focusMin}
+                  min={1}
+                  max={180}
+                  onChange={(v) =>
+                    setSettings((s) => ({ ...s, focusMin: v }))
+                  }
+                />
+                <NumField
+                  label="Short Break"
+                  value={settings.shortBreakMin}
+                  min={1}
+                  max={60}
+                  onChange={(v) =>
+                    setSettings((s) => ({ ...s, shortBreakMin: v }))
+                  }
+                />
+                <NumField
+                  label="Long Break"
+                  value={settings.longBreakMin}
+                  min={1}
+                  max={120}
+                  onChange={(v) =>
+                    setSettings((s) => ({ ...s, longBreakMin: v }))
+                  }
+                />
+              </div>
+
+              <ToggleRow
+                label="Auto Start Breaks"
+                value={settings.autoStartBreaks}
+                onChange={(v) =>
+                  setSettings((s) => ({ ...s, autoStartBreaks: v }))
+                }
+              />
+              <ToggleRow
+                label="Auto Start Pomodoros"
+                value={settings.autoStartPomodoros}
+                onChange={(v) =>
+                  setSettings((s) => ({ ...s, autoStartPomodoros: v }))
+                }
+              />
+
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm font-medium">Long Break interval</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={settings.longBreakInterval}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      longBreakInterval: Math.max(1, Number(e.target.value) || 1),
+                    }))
+                  }
+                  className="w-16 bg-[var(--surface-2)] rounded-lg px-2 py-1 text-sm text-center tabular-nums outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                />
+              </div>
+            </div>
+
+            {/* Sound section */}
+            <div className="border-t border-[var(--border)] px-5 py-4">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-[var(--muted)] mb-3">
+                <SpeakerIcon size={12} /> Sound
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm font-medium">Alarm Sound</span>
+                <select
+                  value={settings.alarmSound}
+                  onChange={(e) =>
+                    setSettings((s) => ({ ...s, alarmSound: e.target.value }))
+                  }
+                  className="bg-[var(--surface-2)] rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)] capitalize"
+                >
+                  {SOUNDS.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-3 py-2">
+                <span className="text-sm tabular-nums w-8 text-right text-[var(--muted)]">
+                  {settings.alarmVolume}
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={settings.alarmVolume}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      alarmVolume: Number(e.target.value),
+                    }))
+                  }
+                  className="flex-1 accent-[var(--foreground)]"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    playAlarm(settings.alarmSound, settings.alarmVolume)
+                  }
+                  className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-xs hover:bg-[var(--surface-2)] transition"
+                >
+                  Test
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+
+/* ------------------------- Sub-components ------------------------- */
+
+function NumField({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="block text-[11px] font-medium text-[var(--muted)] mb-1">
+        {label}
+      </span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => {
+          const n = Number(e.target.value);
+          if (Number.isFinite(n))
+            onChange(Math.max(min, Math.min(max, Math.round(n))));
+        }}
+        className="w-full bg-[var(--surface-2)] rounded-lg px-3 py-2 text-lg font-semibold tabular-nums outline-none focus:ring-2 focus:ring-[var(--accent)]"
+      />
+    </label>
+  );
+}
+
+function ToggleRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between py-2">
+      <span className="text-sm font-medium">{label}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={value}
+        onClick={() => onChange(!value)}
+        className={`relative h-6 w-11 rounded-full transition ${
+          value ? "bg-[var(--foreground)]" : "bg-[var(--surface-2)]"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-[var(--surface)] shadow transition-transform ${
+            value ? "translate-x-5" : "translate-x-0.5"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}

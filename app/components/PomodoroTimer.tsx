@@ -318,10 +318,13 @@ export default function PomodoroTimer() {
               <div className="text-5xl font-bold tabular-nums text-center mt-5">
                 {fmt(remaining)}
               </div>
-              <div className="text-xs text-center text-[var(--muted)] mt-1 mb-4">
-                Session #{completedFocus + (mode === "focus" ? 1 : 0)} · long
-                break every {settings.longBreakInterval}
-              </div>
+              {mode === "focus" ? (
+                <div className="text-xs text-center text-[var(--muted)] mt-1 mb-4">
+                  Session #{completedFocus + 1}
+                </div>
+              ) : (
+                <div className="mt-1 mb-4" />
+              )}
 
               <div className="flex items-center justify-center gap-2 mb-5">
                 {running ? (
@@ -531,13 +534,15 @@ function ToggleRow({
         role="switch"
         aria-checked={value}
         onClick={() => onChange(!value)}
-        className={`relative h-6 w-11 rounded-full transition ${
-          value ? "bg-[var(--foreground)]" : "bg-[var(--surface-2)]"
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+          value
+            ? "bg-[var(--foreground)]"
+            : "bg-[var(--surface-2)] ring-1 ring-inset ring-[var(--border)]"
         }`}
       >
         <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-[var(--surface)] shadow transition-transform ${
-            value ? "translate-x-5" : "translate-x-0.5"
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-[var(--surface)] shadow-sm transition-[left] duration-200 ${
+            value ? "left-[22px]" : "left-0.5"
           }`}
         />
       </button>

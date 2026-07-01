@@ -303,7 +303,13 @@ export default function PomodoroTimer() {
   // Measure trigger button so the popover can float via portal without
   // being clipped by the sticky TopBar's stacking / overflow.
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      // Drop the stale coords so the very next open never renders a
+      // frame at the previous location before the click handler
+      // measures again.
+      setPos(null);
+      return;
+    }
     const measure = () => {
       const b = buttonRef.current;
       if (!b) return;
@@ -351,7 +357,20 @@ export default function PomodoroTimer() {
     <>
       <button
         ref={buttonRef}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          // Measure the trigger's position *before* opening so the
+          // popover's first render lands under the timer instead of
+          // flashing at a stale/default spot for one frame.
+          if (!open && buttonRef.current) {
+            const r = buttonRef.current.getBoundingClientRect();
+            setPos({
+              top: r.bottom + 8,
+              left: r.left + r.width / 2,
+              width: r.width,
+            });
+          }
+          setOpen((v) => !v);
+        }}
         className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium tabular-nums transition ${
           running
             ? "border-[var(--foreground)] bg-[var(--foreground)] text-[var(--surface)]"

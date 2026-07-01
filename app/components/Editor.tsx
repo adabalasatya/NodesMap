@@ -633,6 +633,21 @@ export default function Editor() {
         }
       }
 
+      // Tab — insert a Word-style indent instead of moving focus out
+      // of the editor. Shift-Tab could later be used to outdent.
+      if (e.key === "Tab") {
+        e.preventDefault();
+        // Four non-breaking spaces render as a stable indent that
+        // survives the HTML round-trip through the store.
+        document.execCommand(
+          "insertText",
+          false,
+          "    "
+        );
+        flush();
+        return;
+      }
+
       if (e.key !== "Enter") return;
       const el = editorRef.current;
       if (!el) return;

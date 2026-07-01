@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../lib/auth";
 import { errorMessage } from "../lib/errors";
-import { GoogleIcon } from "./icons";
+import { GoogleIcon, MoonIcon, SunIcon } from "./icons";
+import { useTheme } from "../lib/theme";
 
 const SUPPORT_URL = "https://x.com/NodesMap";
 
@@ -22,7 +23,7 @@ const SHOWCASE = [
   },
   {
     img: "/onboardingImages/planner.jpeg",
-    title: "Plan your study sessions",
+    title: "Plan your sessions",
     desc: "Schedule tasks for any day in the Planner, link them to a folder or file, and they auto-complete when the work is done.",
   },
   {
@@ -121,6 +122,7 @@ function SignInModal({ onClose }: { onClose: () => void }) {
 
 export default function Auth() {
   const [showSignIn, setShowSignIn] = useState(false);
+  const { theme, toggle: toggleTheme } = useTheme();
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -168,6 +170,22 @@ export default function Auth() {
             className="hidden sm:block px-3 py-1.5 rounded-full text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition"
           >
             Support
+          </button>
+          <button
+            onClick={toggleTheme}
+            aria-label="Toggle dark mode"
+            title={
+              theme === "dark"
+                ? "Switch to light mode"
+                : "Switch to dark mode"
+            }
+            className="grid place-items-center size-9 rounded-full text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition"
+          >
+            {theme === "dark" ? (
+              <SunIcon size={16} />
+            ) : (
+              <MoonIcon size={16} />
+            )}
           </button>
           <button
             onClick={() => setShowSignIn(true)}

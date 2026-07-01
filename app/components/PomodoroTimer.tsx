@@ -27,6 +27,7 @@ type Settings = {
   longBreakInterval: number; // every N focus sessions
   alarmSound: string;
   alarmVolume: number; // 0..100
+  alarmDurationSec: number; // how long the alarm keeps ringing
 };
 
 const DEFAULTS: Settings = {
@@ -38,6 +39,7 @@ const DEFAULTS: Settings = {
   longBreakInterval: 4,
   alarmSound: "chime",
   alarmVolume: 60,
+  alarmDurationSec: 5,
 };
 
 const STORAGE_KEY = "noteflow_pomodoro_settings";
@@ -68,8 +70,11 @@ function saveSettings(s: Settings) {
   } catch {}
 }
 
-/** Beep tones for the built-in alarms via WebAudio (no assets needed). */
-function playAlarm(sound: string, volume: number) {
+/** Beep tones for the built-in alarms via WebAudio (no assets needed).
+    The pattern for the selected sound is repeated on a fixed cadence
+    until `durationSec` seconds have elapsed, so the alarm rings for the
+    duration the user configured instead of a single short chirp. */
+function playAlarm(sound: string, volume: number, durationSec: number) {
   if (typeof window === "undefined") return;
   try {
     const AudioCtx =
@@ -100,28 +105,42 @@ function playAlarm(sound: string, volume: number) {
       osc.stop(now + start + dur + 0.02);
     };
 
-    switch (sound) {
-      case "bell":
-        beep(880, 0, 0.25, "triangle");
-        beep(660, 0.28, 0.35, "triangle");
-        break;
-      case "digital":
-        beep(1200, 0, 0.12, "square");
-        beep(1200, 0.18, 0.12, "square");
-        beep(1200, 0.36, 0.12, "square");
-        break;
-      case "kitchen":
-        beep(1400, 0, 0.08, "square");
-        beep(1400, 0.15, 0.08, "square");
-        beep(1400, 0.3, 0.08, "square");
-        beep(1400, 0.45, 0.08, "square");
-        break;
-      default:
-        beep(660, 0, 0.2);
-        beep(880, 0.22, 0.3);
-        break;
-    }
-    setTimeout(() => ctx.close().catch(() => {}), 1200);
+    // One cycle of the pattern for the chosen sound, offset by `t0`.
+    const scheduleCycle = (t0: number) => {
+      switch (sound) {
+        case "bell":
+          beep(880, t0, 0.25, "triangle");
+          beep(660, t0 + 0.28, 0.35, "triangle");
+          break;
+        case "digital":
+          beep(1200, t0, 0.12, "square");
+          beep(1200, t0 + 0.18, 0.12, "square");
+          beep(1200, t0 + 0.36, 0.12, "square");
+          break;
+        case "kitchen":
+          beep(1400, t0, 0.08, "square");
+          beep(1400, t0 + 0.15, 0.08, "square");
+          beep(1400, t0 + 0.3, 0.08, "square");
+          beep(1400, t0 + 0.45, 0.08, "square");
+          break;
+        default: // chime
+          beep(660, t0, 0.2);
+          beep(880, t0 + 0.22, 0.3);
+          break;
+      }
+    };
+
+    // Each pattern is ~0.6s of tone; leave a short gap between repeats
+    // for a natural ringing cadence.
+    const cycleLen = 0.85;
+    const total = Math.max(0.5, durationSec);
+    for (let t = 0; t < total; t += cycleLen) scheduleCycle(t);
+
+    // Close the context a bit after the last cycle finishes.
+    setTimeout(
+      () => ctx.close().catch(() => {}),
+      Math.max(1000, total * 1000 + 400)
+    );
   } catch {
     // ignore audio failures (autoplay policies etc.)
   }
@@ -179,7 +198,11 @@ export default function PomodoroTimer() {
   useEffect(() => {
     if (remaining > 0 || !running) return;
     setRunning(false);
-    playAlarm(settings.alarmSound, settings.alarmVolume);
+    playAlarm(
+      settings.alarmSound,
+      settings.alarmVolume,
+      settings.alarmDurationSec
+    );
     if (mode === "focus") {
       const next = completedFocus + 1;
       setCompletedFocus(next);
@@ -466,12 +489,38 @@ export default function PomodoroTimer() {
                 <button
                   type="button"
                   onClick={() =>
-                    playAlarm(settings.alarmSound, settings.alarmVolume)
+                    playAlarm(
+                      settings.alarmSound,
+                      settings.alarmVolume,
+                      settings.alarmDurationSec
+                    )
                   }
                   className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-xs hover:bg-[var(--surface-2)] transition"
                 >
                   Test
                 </button>
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm font-medium">
+                  Ring duration (sec)
+                </span>
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={settings.alarmDurationSec}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      alarmDurationSec: Math.max(
+                        1,
+                        Math.min(30, Number(e.target.value) || 1)
+                      ),
+                    }))
+                  }
+                  className="w-16 bg-[var(--surface-2)] rounded-lg px-2 py-1 text-sm text-center tabular-nums outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                />
               </div>
             </div>
           </div>,

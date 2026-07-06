@@ -1,0 +1,1084 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { taskDoneOn, taskShowsOn, useStore } from "../lib/store";
+import type { RepeatKind, Task } from "../lib/types";
+import {
+  CheckIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  LinkIcon,
+  PlusIcon,
+  TrashIcon,
+} from "./icons";
+
+const DAY_LABELS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+const MONTH_LABELS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+function ymd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function parseYmd(s: string): Date {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function shiftDays(s: string, n: number): string {
+  const d = parseYmd(s);
+  d.setDate(d.getDate() + n);
+  return ymd(d);
+}
+
+const TODAY = () => ymd(new Date());
+
+export default function PlannerView() {
+  const { state, dispatch } = useStore();
+  const [selectedDate, setSelectedDate] = useState<string>(() => TODAY());
+  const [stripStart, setStripStart] = useState<string>(() => {
+    // Start the strip on the MONDAY of the current week so each "page" of
+    // the strip lines up cleanly with ISO-style calendar weeks
+    // (Mon → Sun).
+    const t = new Date();
+    const dow = t.getDay(); // 0=Sun, 1=Mon, … 6=Sat
+    const offset = dow === 0 ? 6 : dow - 1;
+    t.setDate(t.getDate() - offset);
+    return ymd(t);
+  });
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const STRIP_DAYS = 7;
+  const stripDates = useMemo(() => {
+    const dates: string[] = [];
+    for (let i = 0; i < STRIP_DAYS; i++) dates.push(shiftDays(stripStart, i));
+    return dates;
+  }, [stripStart]);
+
+  const shownTasks = useMemo(
+    () => state.tasks.filter((t) => taskShowsOn(t, selectedDate)),
+    [state.tasks, selectedDate]
+  );
+
+  const incomplete = shownTasks.filter((t) => !taskDoneOn(t, selectedDate));
+  const completed = shownTasks.filter((t) => taskDoneOn(t, selectedDate));
+
+  const monthLabel = (() => {
+    const d = parseYmd(selectedDate);
+    return `${MONTH_LABELS[d.getMonth()]} ${d.getFullYear()}`;
+  })();
+
+  const goBack = () =>
+    dispatch({
+      type: "SET_VIEW",
+      payload: { view: "dashboard", folderId: null, fileId: null },
+    });
+
+  const todayCount = shownTasks.length;
+  const doneCount = completed.length;
+
+  const headerLabel = selectedDate === TODAY() ? "Today" : (() => {
+    const d = parseYmd(selectedDate);
+    return `${DAY_LABELS[d.getDay()].toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())}, ${MONTH_LABELS[d.getMonth()]} ${d.getDate()}`;
+  })();
+
+  return (
+    <div className="p-6 fade-in">
+      <div className="mb-4">
+        <button
+          onClick={goBack}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--border)] hover:bg-[var(--surface-2)] text-sm transition"
+        >
+          <ChevronLeftIcon size={14} /> Back
+        </button>
+      </div>
+
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
+        {/* Header */}
+        <div className="flex items-center justify-between px-8 py-6 border-b border-[var(--border)]">
+          <h1 className="text-3xl font-bold tracking-tight">Planner</h1>
+          <button
+            onClick={() => setAdding((v) => !v)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--border)] hover:bg-[var(--surface-2)] text-sm transition"
+          >
+            <PlusIcon size={14} /> Add task
+          </button>
+        </div>
+
+        {/* Date strip */}
+        <div className="px-8 pt-5 pb-3">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-base font-semibold">{monthLabel}</div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setStripStart((s) => shiftDays(s, -7))}
+                className="p-2 rounded-lg border border-[var(--border)] hover:bg-[var(--surface-2)] text-[var(--muted)] hover:text-[var(--foreground)] transition"
+                aria-label="Previous week"
+              >
+                <ChevronLeftIcon size={14} />
+              </button>
+              <button
+                onClick={() => setStripStart((s) => shiftDays(s, 7))}
+                className="p-2 rounded-lg border border-[var(--border)] hover:bg-[var(--surface-2)] text-[var(--muted)] hover:text-[var(--foreground)] transition"
+                aria-label="Next week"
+              >
+                <ChevronRightIcon size={14} />
+              </button>
+            </div>
+          </div>
+          <div className="flex gap-2 w-full">
+            {stripDates.map((d) => {
+              const date = parseYmd(d);
+              const dow = DAY_LABELS[date.getDay()];
+              const dayNum = date.getDate();
+              const isSelected = d === selectedDate;
+              const hasTasks = state.tasks.some((t) => taskShowsOn(t, d));
+              return (
+                <button
+                  key={d}
+                  onClick={() => setSelectedDate(d)}
+                  className={`flex-1 min-w-0 h-16 flex flex-col items-center justify-center rounded-2xl border transition relative ${
+                    isSelected
+                      ? "bg-[var(--foreground)] text-[var(--surface)] border-[var(--foreground)]"
+                      : "border-[var(--border)] hover:bg-[var(--surface-2)]"
+                  }`}
+                >
+                  <span
+                    className={`text-[10px] tracking-wider ${
+                      isSelected
+                        ? "text-[var(--surface)]/80"
+                        : "text-[var(--muted)]"
+                    }`}
+                  >
+                    {dow}
+                  </span>
+                  <span className="text-lg font-semibold tabular-nums leading-none mt-1">
+                    {dayNum}
+                  </span>
+                  {hasTasks && (
+                    <span
+                      className={`absolute bottom-1.5 size-1 rounded-full ${
+                        isSelected
+                          ? "bg-[var(--surface)]"
+                          : "bg-[var(--muted)]"
+                      }`}
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Tasks */}
+        <div className="px-8 py-6">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-base font-semibold">{headerLabel}</div>
+            <div className="text-sm text-[var(--muted)] tabular-nums">
+              {doneCount}/{todayCount} done
+            </div>
+          </div>
+
+          {todayCount === 0 && !adding && (
+            <div className="rounded-2xl border border-dashed border-[var(--border)] py-10 text-center text-sm text-[var(--muted)]">
+              Nothing scheduled. Tap “Add task” to plan something.
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            {incomplete.map((task) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                date={selectedDate}
+                done={false}
+                onToggle={() =>
+                  dispatch({
+                    type: "TOGGLE_TASK_DONE",
+                    payload: { id: task.id, date: selectedDate },
+                  })
+                }
+                onEdit={() => setEditingId(task.id)}
+                onDelete={() =>
+                  dispatch({ type: "DELETE_TASK", payload: { id: task.id } })
+                }
+              />
+            ))}
+          </div>
+
+          {completed.length > 0 && (
+            <>
+              <div className="flex items-center gap-3 my-5">
+                <span className="h-px flex-1 bg-[var(--border)]" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-[var(--muted)]">
+                  Completed
+                </span>
+                <span className="h-px flex-1 bg-[var(--border)]" />
+              </div>
+              <div className="flex flex-col gap-2">
+                {completed.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    date={selectedDate}
+                    done
+                    onToggle={() =>
+                      dispatch({
+                        type: "TOGGLE_TASK_DONE",
+                        payload: { id: task.id, date: selectedDate },
+                      })
+                    }
+                    onEdit={() => setEditingId(task.id)}
+                    onDelete={() =>
+                      dispatch({
+                        type: "DELETE_TASK",
+                        payload: { id: task.id },
+                      })
+                    }
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {adding && (
+        <AddTaskModal
+          defaultDate={selectedDate}
+          onClose={() => setAdding(false)}
+          onSubmit={(p) => {
+            dispatch({ type: "ADD_TASK", payload: p });
+            setAdding(false);
+          }}
+        />
+      )}
+
+      {editingId &&
+        (() => {
+          const task = state.tasks.find((t) => t.id === editingId);
+          if (!task) return null;
+          return (
+            <AddTaskModal
+              defaultDate={task.startDate}
+              existing={task}
+              onClose={() => setEditingId(null)}
+              onSubmit={(p) => {
+                dispatch({
+                  type: "UPDATE_TASK",
+                  payload: {
+                    id: task.id,
+                    title: p.title,
+                    description: p.description ?? null,
+                    descriptionsByDate: p.descriptionsByDate,
+                    startDate: p.startDate,
+                    time: p.time,
+                    repeat: p.repeat,
+                    linkedFileId: p.linkedFileId,
+                    linkedFolderId: p.linkedFolderId,
+                  },
+                });
+                setEditingId(null);
+              }}
+            />
+          );
+        })()}
+    </div>
+  );
+}
+
+/* ----------------------- Add task modal ----------------------- */
+
+function AddTaskModal({
+  defaultDate,
+  existing,
+  onClose,
+  onSubmit,
+}: {
+  defaultDate: string;
+  existing?: Task;
+  onClose: () => void;
+  onSubmit: (p: {
+    title: string;
+    description?: string;
+    descriptionsByDate?: Record<string, string>;
+    startDate: string;
+    time?: string;
+    repeat: RepeatKind;
+    linkedFileId?: string | null;
+    linkedFolderId?: string | null;
+  }) => void;
+}) {
+  // The form holds its own state; we trigger its submit via this ref.
+  const submitRef = useRef<() => void>(() => {});
+  const [canSubmit, setCanSubmit] = useState(false);
+
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onEsc);
+    // Lock body scroll while the modal is open.
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onEsc);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg max-h-[90vh] rounded-3xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl modal-pop flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={existing ? "Edit task" : "New task"}
+      >
+        {/* Header — fixed */}
+        <header className="shrink-0 px-6 py-5 border-b border-[var(--border)] flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-bold tracking-tight">
+              {existing ? "Edit task" : "New task"}
+            </h2>
+            <p className="text-xs text-[var(--muted)] mt-0.5">
+              {existing
+                ? "Update the details below"
+                : `Schedule something for ${prettyDate(defaultDate)}`}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="size-8 grid place-items-center rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition"
+          >
+            <CloseGlyph />
+          </button>
+        </header>
+
+        {/* Scrollable body — grows + scrolls if the link picker opens */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          <AddTaskForm
+            defaultDate={defaultDate}
+            existing={existing}
+            onSubmit={onSubmit}
+            registerSubmit={(fn) => {
+              submitRef.current = fn;
+            }}
+            onValidChange={setCanSubmit}
+          />
+        </div>
+
+        {/* Footer — fixed, always visible regardless of body scroll */}
+        <div className="shrink-0 px-6 py-3 border-t border-[var(--border)] flex items-center gap-2 justify-end bg-[var(--surface)] rounded-b-3xl">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-sm text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => submitRef.current()}
+            disabled={!canSubmit}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-[var(--foreground)] text-[var(--surface)] disabled:opacity-40 disabled:cursor-not-allowed transition"
+          >
+            <PlusIcon size={13} />
+            {existing ? "Save changes" : "Create task"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PencilGlyph() {
+  return (
+    <svg
+      width={13}
+      height={13}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z" />
+    </svg>
+  );
+}
+
+function CheckCircleGlyph() {
+  return (
+    <svg
+      width={12}
+      height={12}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8 12l3 3 5-6" />
+    </svg>
+  );
+}
+
+function CloseGlyph() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+    >
+      <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
+  );
+}
+
+function prettyDate(s: string): string {
+  const d = parseYmd(s);
+  return `${DAY_LABELS[d.getDay()].toLowerCase().replace(/\b\w/g, (c) =>
+    c.toUpperCase()
+  )}, ${MONTH_LABELS[d.getMonth()]} ${d.getDate()}`;
+}
+
+/* ----------------------- Task row ----------------------- */
+
+function TaskRow({
+  task,
+  date,
+  done,
+  onToggle,
+  onEdit,
+  onDelete,
+}: {
+  task: Task;
+  date: string;
+  done: boolean;
+  onToggle: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { dispatch } = useStore();
+  const autoCompleted = done && task.autoCompletedDates.includes(date);
+
+  return (
+    <div
+      className={`group rounded-2xl border border-[var(--border)] px-4 py-3 flex items-start gap-3 transition ${
+        done ? "bg-[var(--surface-2)]/60" : "bg-[var(--surface)]"
+      }`}
+    >
+      <button
+        onClick={onToggle}
+        aria-label={done ? "Mark not done" : "Mark done"}
+        className={`shrink-0 mt-0.5 grid place-items-center size-6 rounded-full border transition ${
+          done
+            ? "bg-[var(--foreground)] border-[var(--foreground)] text-[var(--surface)]"
+            : "border-[var(--muted)]/60 hover:border-[var(--foreground)]"
+        }`}
+      >
+        {done && <CheckIcon size={13} />}
+      </button>
+      <div className="min-w-0 flex-1">
+        <div
+          className={`text-sm font-semibold ${
+            done ? "text-[var(--muted)]" : ""
+          }`}
+        >
+          {task.title}
+        </div>
+        <div className="mt-1 flex items-center gap-2 text-xs text-[var(--muted)] flex-wrap">
+          {done ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--surface-2)] text-[var(--foreground)] text-[10px] font-medium">
+              <CheckCircleGlyph />
+              {autoCompleted ? "Auto-completed" : "Completed"}
+            </span>
+          ) : (
+            <>
+              <span className="px-2 py-0.5 rounded-full bg-[var(--surface-2)] text-[10px]">
+                {task.repeat === "once"
+                  ? "Today"
+                  : task.repeat === "daily"
+                  ? "Every day"
+                  : "Every week"}
+              </span>
+              {task.time && (
+                <span className="tabular-nums text-[10px]">{task.time}</span>
+              )}
+            </>
+          )}
+          {/* Link badge is always visible now — even when nothing is
+              linked, the pill reads "Not linked" and tapping it opens
+              the same picker so the user can attach one later. */}
+          <LinkedBadge
+            task={task}
+            onChange={(linkedFileId, linkedFolderId) =>
+              dispatch({
+                type: "UPDATE_TASK",
+                payload: { id: task.id, linkedFileId, linkedFolderId },
+              })
+            }
+          />
+        </div>
+        {(() => {
+          // Per-day override wins over the shared daily default.
+          const today = task.descriptionsByDate?.[date];
+          const shown = today ?? task.description;
+          if (!shown) return null;
+          return (
+            <p className="mt-2 text-xs text-[var(--muted)] leading-relaxed whitespace-pre-line">
+              {shown}
+            </p>
+          );
+        })()}
+      </div>
+      <button
+        onClick={onEdit}
+        className="shrink-0 p-1.5 rounded-lg text-[var(--muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition"
+        aria-label="Edit task"
+        title="Edit task"
+      >
+        <PencilGlyph />
+      </button>
+      <button
+        onClick={onDelete}
+        className="shrink-0 p-1.5 rounded-lg text-[var(--muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--danger)] hover:bg-[var(--surface-2)] transition"
+        aria-label="Delete task"
+        title="Delete task"
+      >
+        <TrashIcon size={13} />
+      </button>
+    </div>
+  );
+}
+
+/* ----------------------- Linked badge + popup picker ----------------------- */
+
+function LinkedBadge({
+  task,
+  onChange,
+}: {
+  task: Task;
+  onChange: (
+    linkedFileId: string | null,
+    linkedFolderId: string | null
+  ) => void;
+}) {
+  const { state } = useStore();
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      if (
+        wrapperRef.current &&
+        !wrapperRef.current.contains(e.target as Node)
+      )
+        setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  const folderPath = (folderId: string): string => {
+    const parts: string[] = [];
+    let cur = state.folders.find((f) => f.id === folderId);
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      parts.unshift(cur.name);
+      cur = cur.parentId
+        ? state.folders.find((x) => x.id === cur!.parentId)
+        : undefined;
+    }
+    return parts.join(" / ");
+  };
+
+  const linkedFile = task.linkedFileId
+    ? state.files.find((f) => f.id === task.linkedFileId)
+    : null;
+  const linkedFolder = task.linkedFolderId
+    ? state.folders.find((f) => f.id === task.linkedFolderId)
+    : null;
+  const isLinked = !!(linkedFile || linkedFolder);
+  const tooltip = linkedFile
+    ? `${folderPath(linkedFile.folderId)} / ${linkedFile.title.replace(/\.md$/i, "")}`
+    : linkedFolder
+    ? folderPath(linkedFolder.id)
+    : "Tap to link a folder or file";
+
+  const matches = (label: string) =>
+    !search || label.toLowerCase().includes(search.toLowerCase());
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={tooltip}
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition ${
+          isLinked
+            ? "bg-[var(--surface-2)] text-[var(--foreground)] hover:bg-[var(--surface-3,var(--surface-2))]"
+            : "border border-dashed border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)]"
+        }`}
+      >
+        <LinkIcon size={10} />
+        {isLinked ? "Linked" : "Not linked"}
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 w-72 max-h-72 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-lg z-30 p-1.5">
+          <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-[var(--muted)]">
+            Change link
+          </div>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search folders / files…"
+            className="w-full bg-[var(--surface-2)] rounded-lg px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-[var(--accent)] mb-1"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              onChange(null, null);
+              setOpen(false);
+            }}
+            className="w-full text-left px-2.5 py-1.5 rounded-md text-xs text-[var(--muted)] hover:bg-[var(--surface-2)] transition"
+          >
+            Remove link
+          </button>
+          {state.folders.length > 0 && (
+            <>
+              <div className="h-px bg-[var(--border)] my-1" />
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
+                Folders
+              </div>
+              {state.folders
+                .filter((f) => matches(folderPath(f.id)))
+                .map((f) => (
+                  <button
+                    key={`folder-${f.id}`}
+                    type="button"
+                    onClick={() => {
+                      onChange(null, f.id);
+                      setOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs hover:bg-[var(--surface-2)] transition truncate ${
+                      task.linkedFolderId === f.id ? "font-semibold" : ""
+                    }`}
+                  >
+                    {folderPath(f.id)}
+                  </button>
+                ))}
+            </>
+          )}
+          {state.files.length > 0 && (
+            <>
+              <div className="h-px bg-[var(--border)] my-1" />
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
+                Files
+              </div>
+              {state.files
+                .filter((f) =>
+                  matches(`${f.title} ${folderPath(f.folderId)}`)
+                )
+                .map((f) => (
+                  <button
+                    key={`file-${f.id}`}
+                    type="button"
+                    onClick={() => {
+                      onChange(f.id, null);
+                      setOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs hover:bg-[var(--surface-2)] transition truncate ${
+                      task.linkedFileId === f.id ? "font-semibold" : ""
+                    }`}
+                  >
+                    {folderPath(f.folderId)} /{" "}
+                    {f.title.replace(/\.md$/i, "")}
+                  </button>
+                ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ----------------------- Add task form ----------------------- */
+
+function AddTaskForm({
+  defaultDate,
+  existing,
+  onSubmit,
+  registerSubmit,
+  onValidChange,
+}: {
+  defaultDate: string;
+  existing?: Task;
+  onSubmit: (p: {
+    title: string;
+    description?: string;
+    descriptionsByDate?: Record<string, string>;
+    startDate: string;
+    time?: string;
+    repeat: RepeatKind;
+    linkedFileId?: string | null;
+    linkedFolderId?: string | null;
+  }) => void;
+  registerSubmit?: (fn: () => void) => void;
+  onValidChange?: (valid: boolean) => void;
+}) {
+  const { state } = useStore();
+  const [title, setTitle] = useState(existing?.title ?? "");
+  // Description is *always* per-day now. On open, prefer the entry for
+  // `defaultDate` in the per-day map. Fall back to the legacy shared
+  // `description` field so users with older tasks still see their text.
+  const initialDayOverride =
+    existing?.descriptionsByDate?.[defaultDate];
+  const [description, setDescription] = useState(
+    initialDayOverride ?? existing?.description ?? ""
+  );
+  const [time, setTime] = useState(existing?.time ?? "");
+  const [repeat, setRepeat] = useState<RepeatKind>(
+    existing?.repeat ?? "once"
+  );
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkSearch, setLinkSearch] = useState("");
+  const [linkedFileId, setLinkedFileId] = useState<string | null>(
+    existing?.linkedFileId ?? null
+  );
+  const [linkedFolderId, setLinkedFolderId] = useState<string | null>(
+    existing?.linkedFolderId ?? null
+  );
+  const linkRef = useRef<HTMLDivElement | null>(null);
+  const linkBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [pickerPos, setPickerPos] = useState<{
+    left: number;
+    bottom: number;
+    width: number;
+  } | null>(null);
+
+  // Compute popup position so it floats just ABOVE the trigger button.
+  // Re-measure when (a) the picker opens, and (b) the window resizes.
+  useEffect(() => {
+    if (!linkOpen) {
+      setPickerPos(null);
+      return;
+    }
+    const measure = () => {
+      const btn = linkBtnRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setPickerPos({
+        left: r.left,
+        bottom: window.innerHeight - r.top + 8,
+        width: r.width,
+      });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [linkOpen]);
+
+  const folderPath = (folderId: string): string => {
+    const parts: string[] = [];
+    let cur = state.folders.find((f) => f.id === folderId);
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      parts.unshift(cur.name);
+      cur = cur.parentId
+        ? state.folders.find((x) => x.id === cur!.parentId)
+        : undefined;
+    }
+    return parts.join(" / ");
+  };
+
+  const linkLabel = (() => {
+    if (linkedFileId) {
+      const f = state.files.find((x) => x.id === linkedFileId);
+      if (!f) return "Linked";
+      const path = folderPath(f.folderId);
+      return `${path ? path + " / " : ""}${f.title.replace(/\.md$/i, "")}`;
+    }
+    if (linkedFolderId) {
+      return folderPath(linkedFolderId);
+    }
+    return null;
+  })();
+
+  const matches = (label: string) =>
+    !linkSearch || label.toLowerCase().includes(linkSearch.toLowerCase());
+
+  const submit = () => {
+    if (!title.trim()) return;
+    const text = description.trim();
+    // Every description is scoped to the selected date. We update the
+    // per-day map only; the legacy shared `description` field is left
+    // untouched (kept for reading old tasks, never written from here).
+    const prevMap = existing?.descriptionsByDate ?? {};
+    const nextMap: Record<string, string> = { ...prevMap };
+    if (text) nextMap[defaultDate] = text;
+    else delete nextMap[defaultDate];
+    onSubmit({
+      title,
+      description: existing?.description,
+      descriptionsByDate:
+        Object.keys(nextMap).length > 0 ? nextMap : undefined,
+      startDate: existing?.startDate ?? defaultDate,
+      time: time || undefined,
+      repeat,
+      linkedFileId,
+      linkedFolderId,
+    });
+  };
+
+  // Expose the submit handler to the modal's sticky footer + report
+  // validity so it can enable/disable the "Create" button.
+  useEffect(() => {
+    registerSubmit?.(submit);
+    onValidChange?.(title.trim().length > 0);
+    // submit closes over local state; re-register on every change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, description, time, repeat, linkedFileId, linkedFolderId]);
+
+  return (
+    <div className="flex flex-col gap-5">
+      <Field label="Task name">
+        <input
+          autoFocus
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submit();
+          }}
+          placeholder="What do you want to get done?"
+          className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+        />
+      </Field>
+
+      <Field label="Description (optional)">
+        {/* Descriptions are per-day — this text will only appear on the
+            currently-selected date. */}
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={3}
+          placeholder={`Notes just for ${prettyDate(defaultDate)}…`}
+          className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)] resize-y min-h-[72px]"
+        />
+      </Field>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Time (optional)">
+          <input
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+          />
+        </Field>
+        <Field label="Repeat">
+          <div className="inline-flex w-full rounded-xl border border-[var(--border)] p-1">
+            {(
+              [
+                { v: "once", label: "Today" },
+                { v: "daily", label: "Daily" },
+                { v: "weekly", label: "Weekly" },
+              ] as { v: RepeatKind; label: string }[]
+            ).map((opt) => (
+              <button
+                key={opt.v}
+                type="button"
+                onClick={() => setRepeat(opt.v)}
+                className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-medium transition ${
+                  repeat === opt.v
+                    ? "bg-[var(--foreground)] text-[var(--surface)]"
+                    : "text-[var(--muted)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </Field>
+      </div>
+
+      <Field label="Link a folder or file (optional)">
+        <div ref={linkRef}>
+          <button
+            ref={linkBtnRef}
+            type="button"
+            onClick={() => setLinkOpen((v) => !v)}
+            className={`w-full inline-flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl border text-sm transition ${
+              linkLabel
+                ? "border-[var(--foreground)] text-[var(--foreground)]"
+                : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)]"
+            }`}
+          >
+            <span className="truncate text-left">
+              {linkLabel ? linkLabel : "Pick something to link"}
+            </span>
+            <span className="text-[var(--muted)] shrink-0">
+              {linkOpen ? "▾" : "▴"}
+            </span>
+          </button>
+          {linkOpen && pickerPos &&
+            typeof window !== "undefined" &&
+            createPortal(
+              <div
+                style={{
+                  position: "fixed",
+                  left: pickerPos.left,
+                  bottom: pickerPos.bottom,
+                  width: pickerPos.width,
+                  maxHeight: 320,
+                  zIndex: 60,
+                }}
+                className="overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl p-1.5"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <input
+                  value={linkSearch}
+                  onChange={(e) => setLinkSearch(e.target.value)}
+                  placeholder="Search folders / files…"
+                  className="w-full bg-[var(--surface-2)] rounded-lg px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-[var(--accent)] mb-2"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLinkedFileId(null);
+                    setLinkedFolderId(null);
+                    setLinkOpen(false);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-md text-xs text-[var(--muted)] hover:bg-[var(--surface-2)] transition"
+                >
+                  No link
+                </button>
+                {state.folders.length > 0 && (
+                  <>
+                    <div className="h-px bg-[var(--border)] my-1" />
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
+                      Folders
+                    </div>
+                    {state.folders
+                      .filter((f) => matches(folderPath(f.id)))
+                      .map((f) => (
+                        <button
+                          key={`folder-${f.id}`}
+                          type="button"
+                          onClick={() => {
+                            setLinkedFolderId(f.id);
+                            setLinkedFileId(null);
+                            setLinkOpen(false);
+                          }}
+                          className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs hover:bg-[var(--surface-2)] transition truncate ${
+                            linkedFolderId === f.id ? "font-semibold" : ""
+                          }`}
+                        >
+                          {folderPath(f.id)}
+                        </button>
+                      ))}
+                  </>
+                )}
+                {state.files.length > 0 && (
+                  <>
+                    <div className="h-px bg-[var(--border)] my-1" />
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--muted)]">
+                      Files
+                    </div>
+                    {state.files
+                      .filter((f) =>
+                        matches(`${f.title} ${folderPath(f.folderId)}`)
+                      )
+                      .map((f) => (
+                        <button
+                          key={`file-${f.id}`}
+                          type="button"
+                          onClick={() => {
+                            setLinkedFileId(f.id);
+                            setLinkedFolderId(null);
+                            setLinkOpen(false);
+                          }}
+                          className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs hover:bg-[var(--surface-2)] transition truncate ${
+                            linkedFileId === f.id ? "font-semibold" : ""
+                          }`}
+                        >
+                          {folderPath(f.folderId)} /{" "}
+                          {f.title.replace(/\.md$/i, "")}
+                        </button>
+                      ))}
+                  </>
+                )}
+              </div>,
+              document.body
+            )}
+        </div>
+        {linkLabel && (
+          <p className="mt-2 text-[11px] text-[var(--muted)]">
+            This task will auto-complete when the linked content is marked
+            done.
+          </p>
+        )}
+      </Field>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="block text-xs font-medium text-[var(--muted)] mb-1.5">
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}

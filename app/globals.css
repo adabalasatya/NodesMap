@@ -1,0 +1,413 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  /* Background is pure white; surface sits one step away as a soft-grey
+     "card" layer for the sidebar, top header and folder cards — same
+     visual rhythm as dark mode where surface is one step lighter than
+     background. Hover/active states use surface-2, one more step out. */
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  /* Soft-grey layers dialled back ~40% from the previous step so cards
+     read as a gentle tint rather than a pronounced fill. */
+  --surface: #f8f8f8;
+  --surface-2: #f0f0f0;
+  --surface-3: #e6e6e6;
+  --border: #dcdcdc;
+  --muted: #6b7280;
+  --accent: #111111;
+  --success: #2a2a2a;
+  --danger: #1a1a1a;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  /* Pure neutral grayscale — no blue/red cast. R = G = B at every step
+     so the sidebar, top bar and folder cards read as true black/grey
+     instead of looking slightly blue. */
+  --background: #0a0a0a;
+  --foreground: #f5f5f5;
+  --surface: #141414;
+  --surface-2: #1e1e1e;
+  --surface-3: #282828;
+  --border: #282828;
+  --muted: #9a9a9a;
+  --accent: #f5f5f5;
+  --success: #e0e0e0;
+  --danger: #ff6b6b;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  border-color: var(--border);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Markdown preview styling */
+.md-preview h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 1.2rem 0 0.6rem;
+  line-height: 1.2;
+}
+.md-preview h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 1rem 0 0.5rem;
+}
+.md-preview h3 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0.8rem 0 0.4rem;
+}
+.md-preview p {
+  margin: 0.6rem 0;
+  line-height: 1.6;
+}
+.md-preview ul,
+.md-preview ol {
+  padding-left: 1.4rem;
+  margin: 0.6rem 0;
+}
+.md-preview ul {
+  list-style: disc;
+}
+.md-preview ol {
+  list-style: decimal;
+}
+.md-preview li {
+  margin: 0.25rem 0;
+}
+.md-preview code {
+  background: var(--surface-2);
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.9em;
+}
+.md-preview pre {
+  background: var(--surface-2);
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+.md-preview pre code {
+  background: transparent;
+  padding: 0;
+}
+.md-preview a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.md-preview blockquote {
+  border-left: 3px solid var(--border);
+  padding: 0.3rem 0.8rem;
+  color: var(--muted);
+  margin: 0.6rem 0;
+}
+.md-preview .task {
+  list-style: none;
+  margin-left: -1.2rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.md-preview hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1rem 0;
+}
+
+/* Rich editor (contenteditable) */
+.rich-editor:empty::before,
+.rich-editor[data-empty="true"]::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+  display: block;
+}
+.rich-editor:focus {
+  outline: none;
+}
+.rich-editor h1 {
+  font-size: 1.9rem;
+  font-weight: 700;
+  margin: 1rem 0 0.5rem;
+  line-height: 1.2;
+}
+.rich-editor h2 {
+  font-size: 1.45rem;
+  font-weight: 600;
+  margin: 0.9rem 0 0.45rem;
+}
+.rich-editor h3 {
+  font-size: 1.18rem;
+  font-weight: 600;
+  margin: 0.75rem 0 0.4rem;
+}
+.rich-editor p {
+  margin: 0.4rem 0;
+}
+.rich-editor ul {
+  list-style: disc;
+  padding-left: 1.4rem;
+  margin: 0.4rem 0;
+}
+.rich-editor ol {
+  list-style: decimal;
+  padding-left: 1.4rem;
+  margin: 0.4rem 0;
+}
+.rich-editor li {
+  margin: 0.15rem 0;
+}
+.rich-editor ul.cb-list,
+.rich-editor ul.rb-list {
+  list-style: none;
+  padding-left: 0.5rem;
+  margin: 0.4rem 0;
+}
+.rich-editor ul.cb-list > li,
+.rich-editor ul.rb-list > li {
+  position: relative;
+  padding-left: 1.85rem;
+  margin: 0.3rem 0;
+  min-height: 1.6rem;
+}
+.rich-editor ul.cb-list > li::before {
+  content: "";
+  position: absolute;
+  left: 0.15rem;
+  top: 0.42rem;
+  width: 0.95rem;
+  height: 0.95rem;
+  border: 1.5px solid var(--muted);
+  border-radius: 4px;
+  background: var(--surface);
+}
+.rich-editor ul.rb-list > li::before {
+  content: "";
+  position: absolute;
+  left: 0.15rem;
+  top: 0.42rem;
+  width: 0.95rem;
+  height: 0.95rem;
+  border: 1.5px solid var(--muted);
+  border-radius: 50%;
+  background: var(--surface);
+}
+.rich-editor code {
+  background: var(--surface-2);
+  padding: 0.12rem 0.35rem;
+  border-radius: 4px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.9em;
+}
+.rich-editor pre {
+  background: var(--surface-2);
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.6rem 0;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+.rich-editor pre code {
+  background: transparent;
+  padding: 0;
+}
+.rich-editor blockquote {
+  border-left: 3px solid var(--border);
+  padding: 0.25rem 0.75rem;
+  color: var(--muted);
+  margin: 0.5rem 0;
+}
+.rich-editor hr {
+  border: none;
+  margin: 0.9rem 0;
+  width: 100%;
+  height: 0;
+}
+.rich-editor hr.div-line {
+  border-top: 1px solid var(--border);
+}
+.rich-editor hr.div-dots {
+  border-top: 2px dotted var(--muted);
+}
+.rich-editor hr.div-block {
+  border-top: 2px dashed var(--muted);
+}
+.rich-editor pre {
+  position: relative;
+}
+/* The empty paragraph that follows a <pre> is the user's escape hatch
+   out of the code block — make sure it has clickable height even when
+   it only contains a single <br>. */
+.rich-editor pre + p {
+  min-height: 1.6em;
+  margin-top: 0.25rem;
+}
+.rich-editor pre::before {
+  content: ">_";
+  position: absolute;
+  top: 0.35rem;
+  right: 0.6rem;
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  opacity: 0.7;
+}
+.rich-editor a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* Subtle fade-in for view transitions */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-in {
+  animation: fadeIn 180ms ease-out;
+}
+
+@keyframes modalPop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.modal-pop {
+  animation: modalPop 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Brand-matched spinner used by the global LoadingOverlay */
+.loading-spinner {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2.5px solid var(--surface-2);
+  border-top-color: var(--foreground);
+  animation: spin 700ms linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Smoothed view-transition fade for the workspace router.
+   Opacity-only — adding `transform` (even translateY(0)) would create a
+   new containing block for any `position: fixed` descendant, which
+   would scope modals/overlays to the workspace and skip the sidebar. */
+@keyframes viewIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.view-fade {
+  animation: viewIn 220ms ease-out;
+}
+
+/* Mind map animations — opacity / filter only so we never fight with the
+   per-node SVG `transform="translate(x y)"` attribute that positions each
+   node. (Using CSS `transform` would override the translate and collapse
+   every animating node back to the origin.) */
+.mm-svg .mm-node {
+  opacity: 0;
+  animation: mmNodeIn 450ms ease-out forwards;
+  transition: filter 200ms ease;
+}
+.mm-svg .mm-node:hover {
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.18));
+}
+.mm-svg .mm-edge {
+  stroke-dasharray: 1200;
+  stroke-dashoffset: 1200;
+  animation: mmEdgeIn 760ms ease-out forwards;
+}
+.mm-svg .mm-halo {
+  animation: mmPulse 3.4s ease-in-out infinite;
+}
+@keyframes mmNodeIn {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes mmEdgeIn {
+  0% {
+    stroke-dashoffset: 1200;
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+@keyframes mmPulse {
+  0%,
+  100% {
+    opacity: 0.08;
+  }
+  50% {
+    opacity: 0.18;
+  }
+}

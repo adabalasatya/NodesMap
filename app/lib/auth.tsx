@@ -31,14 +31,15 @@ interface AuthCtx {
 const Ctx = createContext<AuthCtx | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [status, setStatus] = useState<AuthState>("initializing");
+  // Derive the initial status from Supabase config so we don't need a
+  // cascading `setStatus("disabled")` in the effect below.
+  const [status, setStatus] = useState<AuthState>(() =>
+    hasSupabaseConfig() ? "initializing" : "disabled"
+  );
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
-    if (!hasSupabaseConfig()) {
-      setStatus("disabled");
-      return;
-    }
+    if (!hasSupabaseConfig()) return;
     const sb = getSupabase();
     let mounted = true;
 

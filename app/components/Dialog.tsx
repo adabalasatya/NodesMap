@@ -94,6 +94,17 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const close = useCallback(
+    (result: boolean | string | null) => {
+      if (!state) return;
+      if (state.kind === "alert") state.resolve();
+      else if (state.kind === "confirm") state.resolve(!!result);
+      else state.resolve(typeof result === "string" ? result : null);
+      setState(null);
+    },
+    [state]
+  );
+
   // Esc / body-scroll lock while open.
   useEffect(() => {
     if (!state) return;
@@ -107,16 +118,7 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
       document.removeEventListener("keydown", onEsc);
       document.body.style.overflow = prev;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state]);
-
-  const close = (result: boolean | string | null) => {
-    if (!state) return;
-    if (state.kind === "alert") state.resolve();
-    else if (state.kind === "confirm") state.resolve(!!result);
-    else state.resolve(typeof result === "string" ? result : null);
-    setState(null);
-  };
+  }, [state, close]);
 
   const ctxValue: DialogContextValue = {
     alert: alertFn,

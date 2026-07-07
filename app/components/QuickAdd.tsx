@@ -146,10 +146,8 @@ export default function QuickAdd() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, state.folders, state.files, state.currentFolderId]);
 
-  // Reset highlight when the result list changes.
-  useEffect(() => {
-    setHi(0);
-  }, [query]);
+  // Highlight reset is folded into the input onChange handler and the
+  // Ctrl+K open shortcut, so a synchronising useEffect isn't needed.
 
   const run = (item: Item) => {
     if (item.kind === "file") {
@@ -192,7 +190,10 @@ export default function QuickAdd() {
         <input
           ref={inputRef}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setHi(0);
+          }}
           onKeyDown={(e) => {
             if (e.key === "ArrowDown") {
               e.preventDefault();

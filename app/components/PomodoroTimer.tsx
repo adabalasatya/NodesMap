@@ -210,14 +210,19 @@ export default function PomodoroTimer() {
     width: number;
   } | null>(null);
 
-  // Hydrate settings & seed remaining once on mount.
+  // Hydrate settings & seed remaining once on mount. Reading localStorage
+  // during render would produce a Next.js SSR/CSR mismatch, so this is
+  // the canonical mount-effect hydration pattern.
   useEffect(() => {
     const s = loadSettings();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSettings(s);
     setRemaining(s.focusMin * 60);
   }, []);
 
-  // Persist settings whenever they change (after first mount).
+  // Persist settings whenever they change (after first mount). Adjusting
+  // `remaining` in response to a user-changed setting is a legitimate
+  // external-input → local-state sync, not a cascade.
   const hydrated = useRef(false);
   useEffect(() => {
     if (!hydrated.current) {
@@ -226,6 +231,7 @@ export default function PomodoroTimer() {
     }
     saveSettings(settings);
     // If not running, adjust the visible time to reflect the new mode length.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!running) setRemaining(modeSeconds(mode, settings));
   }, [settings, mode, running]);
 
@@ -262,9 +268,13 @@ export default function PomodoroTimer() {
     };
   }, [running, mode, dispatch]);
 
-  // End-of-session handling.
+  // End-of-session handling — reacts to the timer hitting zero, which is
+  // itself driven by the tick effect above. This is a "chained state
+  // machine" step (a state transition triggered by another state), so
+  // setStates in the effect body are the natural expression.
   useEffect(() => {
     if (remaining > 0 || !running) return;
+    /* eslint-disable react-hooks/set-state-in-effect */
     setRunning(false);
     playAlarm(
       settings.alarmSound,
@@ -284,6 +294,7 @@ export default function PomodoroTimer() {
       setRemaining(modeSeconds("focus", settings));
       if (settings.autoStartPomodoros) setRunning(true);
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remaining]);
 
@@ -303,13 +314,7 @@ export default function PomodoroTimer() {
   // Measure trigger button so the popover can float via portal without
   // being clipped by the sticky TopBar's stacking / overflow.
   useEffect(() => {
-    if (!open) {
-      // Drop the stale coords so the very next open never renders a
-      // frame at the previous location before the click handler
-      // measures again.
-      setPos(null);
-      return;
-    }
+    if (!open) return;
     const measure = () => {
       const b = buttonRef.current;
       if (!b) return;

@@ -564,9 +564,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [userId]);
 
-  // 1) Hydrate from localStorage (or seed) - per user namespace
+  // 1) Hydrate from localStorage (or seed) - per user namespace. This is
+  // a canonical "external store → React state" bridge (localStorage +
+  // the seeded content), so the setState-in-effect rule doesn't apply.
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHydrated(false);
     setPullReady(false);
     syncedRef.current = {
@@ -654,10 +657,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     userId,
   ]);
 
-  // 3) Initial pull from Supabase + mark sync ready
+  // 3) Initial pull from Supabase + mark sync ready. Syncing the sync
+  // status flag with external config (Supabase env + userId) is exactly
+  // the pattern the setState-in-effect rule advises to consider — it's
+  // fine here because the dependent state is not read within this render.
   useEffect(() => {
     if (typeof window === "undefined" || !hydrated) return;
     if (!hasSupabaseConfig() || !userId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSync("offline");
       return;
     }

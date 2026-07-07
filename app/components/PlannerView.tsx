@@ -801,11 +801,10 @@ function AddTaskForm({
 
   // Compute popup position so it floats just ABOVE the trigger button.
   // Re-measure when (a) the picker opens, and (b) the window resizes.
+  // The rendered picker gates on `linkOpen && pickerPos`, so a stale
+  // pickerPos while linkOpen is false is harmless — no need to null it.
   useEffect(() => {
-    if (!linkOpen) {
-      setPickerPos(null);
-      return;
-    }
+    if (!linkOpen) return;
     const measure = () => {
       const btn = linkBtnRef.current;
       if (!btn) return;

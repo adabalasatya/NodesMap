@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { selectFolderProgressDeep, useStore } from "../lib/store";
 import type { Folder, NoteFile } from "../lib/types";
 import { ChevronLeftIcon } from "./icons";
@@ -111,13 +111,9 @@ function FolderMindMap({
   const { state, dispatch } = useStore();
   const cx = W / 2;
   const cy = H / 2;
-  // Animated reveal — bumps a key when the visible folder changes so the
-  // SVG re-mounts with fresh CSS animations.
-  const [revealKey, setRevealKey] = useState(0);
-  useEffect(() => {
-    setRevealKey((k) => k + 1);
-  }, [folder.id]);
-
+  // Animated reveal — using folder.id as the SVG `key` remounts the
+  // element (and re-runs the CSS animations) whenever the visible
+  // folder changes, without needing a synchronizing setState in effect.
   const tree = useMemo(
     () => buildTree(folder, state.folders, state.files),
     [folder, state.folders, state.files]
@@ -156,7 +152,7 @@ function FolderMindMap({
 
   return (
     <svg
-      key={revealKey}
+      key={folder.id}
       viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
       className={`${compact ? "w-full" : "w-full h-full"} mm-svg`}
       style={

@@ -22,6 +22,12 @@ import {
   TrashIcon,
 } from "./icons";
 import PomodoroTimer from "./PomodoroTimer";
+import DrawCanvas from "./DrawCanvas";
+import {
+  extractDrawing,
+  embedDrawing,
+  type Drawing,
+} from "../lib/drawStore";
 
 const SYNC_DEBOUNCE_MS = 5_000;
 type SaveStatus = "saved" | "editing" | "syncing" | "failed";
@@ -32,6 +38,8 @@ const DEFAULT_FONT = 14;
 type Formats = {
   bold: boolean;
   italic: boolean;
+  underline: boolean;
+  strike: boolean;
   h1: boolean;
   h2: boolean;
   h3: boolean;
@@ -43,12 +51,15 @@ type Formats = {
   cb: boolean;
   rb: boolean;
   inCode: boolean;
+  inQuote: boolean;
   fontSize: number;
 };
 
 const emptyFormats: Formats = {
   bold: false,
   italic: false,
+  underline: false,
+  strike: false,
   h1: false,
   h2: false,
   h3: false,
@@ -60,6 +71,7 @@ const emptyFormats: Formats = {
   cb: false,
   rb: false,
   inCode: false,
+  inQuote: false,
   fontSize: DEFAULT_FONT,
 };
 
@@ -77,18 +89,37 @@ export default function Editor() {
   const debounceRef = useRef<number | null>(null);
   const pendingFileRef = useRef<string | null>(null);
   const statePulse = useRef(state);
-  statePulse.current = state;
+  useEffect(() => {
+    statePulse.current = state;
+  }, [state]);
 
   // Compute the HTML to load: a localStorage draft (if present) wins over
   // the Supabase-synced content, since the draft is by definition newer.
-  const initialHtml = useMemo(() => {
-    if (!file) return "";
+  // The stored string may end in an embedded drawing comment which we
+  // strip so the editor never sees it (it's the canvas's job to render
+  // that portion).
+  const { initialHtml, initialDrawing } = useMemo(() => {
+    if (!file) return { initialHtml: "", initialDrawing: { shapes: [] } as Drawing };
     const draft = readDraft(file.id);
     const source = draft?.content ?? file.content ?? "";
-    if (!source) return "";
-    if (/<[a-z][^>]*>/i.test(source)) return source;
-    return renderMarkdown(source);
+    if (!source) return { initialHtml: "", initialDrawing: { shapes: [] } as Drawing };
+    const { html, drawing } = extractDrawing(source);
+    const isHtml = /<[a-z][^>]*>/i.test(html);
+    return {
+      initialHtml: isHtml ? html : renderMarkdown(html),
+      initialDrawing: drawing,
+    };
   }, [file?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Current drawing kept in a ref so the text-flush path can round-trip it
+  // untouched, and in state so React re-renders when the canvas edits it.
+  const [drawingState, setDrawingState] = useState<Drawing>(initialDrawing);
+  const drawingRef = useRef<Drawing>(initialDrawing);
+  useEffect(() => {
+    drawingRef.current = drawingState;
+  }, [drawingState]);
+
+  const [mode, setMode] = useState<"text" | "draw">("text");
 
   // Did we load from a draft on open? Reflect that in the status badge.
   const initialStatus = useMemo<SaveStatus>(() => {
@@ -101,7 +132,14 @@ export default function Editor() {
     if (loadedFileId.current === file.id) return;
     loadedFileId.current = file.id;
     editorRef.current.innerHTML = initialHtml;
-    lastWrittenContent.current = initialHtml;
+    // Sync the drawing state and ref together with the text HTML so all
+    // three views of the file (editor, canvas, saved-content baseline)
+    // agree on what "no user edit yet" looks like.
+    setDrawingState(initialDrawing);
+    drawingRef.current = initialDrawing;
+    // Store the *combined* (text + drawing) form so the next flush
+    // correctly considers this a no-op unless the user actually edits.
+    lastWrittenContent.current = embedDrawing(initialHtml, initialDrawing);
     setStatus(initialStatus);
     editorRef.current.focus();
     // If we loaded a draft, hydrate in-memory state so other views see the
@@ -113,7 +151,7 @@ export default function Editor() {
         payload: { id: file.id, content: draft.content },
       });
     }
-  }, [file, initialHtml, initialStatus, dispatch]);
+  }, [file, initialHtml, initialDrawing, initialStatus, dispatch]);
 
   // Push the latest content of `fileId` to Supabase. Returns true on a
   // confirmed save (draft cleared); false otherwise (draft preserved so a
@@ -166,21 +204,39 @@ export default function Editor() {
   );
 
   // Editor input → write draft instantly, dispatch in-memory state, status
-  // "editing", reset the 30-second timer.
+  // "editing", reset the 30-second timer. Persist the current drawing at
+  // the tail of the content so it round-trips through Supabase alongside
+  // the text HTML.
   const flush = useCallback(() => {
     const el = editorRef.current;
-    if (!el || !file) return;
-    const html = el.innerHTML;
-    if (html === lastWrittenContent.current) return;
-    lastWrittenContent.current = html;
-    writeDraft(file.id, html);
+    if (!file) return;
+    const html = el ? el.innerHTML : "";
+    const combined = embedDrawing(html, drawingRef.current);
+    if (combined === lastWrittenContent.current) return;
+    lastWrittenContent.current = combined;
+    writeDraft(file.id, combined);
     dispatch({
       type: "UPDATE_FILE",
-      payload: { id: file.id, content: html },
+      payload: { id: file.id, content: combined },
     });
     setStatus("editing");
     armDebounce(file.id);
   }, [dispatch, file, armDebounce]);
+
+  // Draw-canvas edits: update local state, then flush to storage. The
+  // text editor's innerHTML is preserved; only the tail-embedded drawing
+  // changes.
+  const onDrawingChange = useCallback(
+    (next: Drawing) => {
+      setDrawingState(next);
+      drawingRef.current = next;
+      // Defer the flush so React commits state before we read innerHTML
+      // (which is unchanged in draw mode, but flush() is what triggers
+      // the debounced Supabase sync).
+      queueMicrotask(() => flush());
+    },
+    [flush]
+  );
 
   // Manual retry hook for the failed state.
   const retrySync = useCallback(async () => {
@@ -272,6 +328,8 @@ export default function Editor() {
     setFormats({
       bold: document.queryCommandState("bold"),
       italic: document.queryCommandState("italic"),
+      underline: document.queryCommandState("underline"),
+      strike: document.queryCommandState("strikeThrough"),
       h1: blockTag === "h1",
       h2: blockTag === "h2",
       h3: blockTag === "h3",
@@ -283,6 +341,7 @@ export default function Editor() {
       cb: !!elNode?.closest?.("ul.cb-list"),
       rb: !!elNode?.closest?.("ul.rb-list"),
       inCode: !!elNode?.closest?.("pre, code"),
+      inQuote: !!elNode?.closest?.("blockquote"),
       fontSize: computedSize || DEFAULT_FONT,
     });
   }, []);
@@ -304,10 +363,93 @@ export default function Editor() {
     [flush, updateFormats]
   );
 
-  /* --- Bold / Italic — apply forward; ok with or without selection.
-         execCommand toggles for next-typed-characters when collapsed. --- */
+  /* --- Bold / Italic / Underline / Strike — apply forward; ok with or
+         without selection. execCommand toggles for next-typed-characters
+         when collapsed. --- */
   const toggleBold = useCallback(() => exec("bold"), [exec]);
   const toggleItalic = useCallback(() => exec("italic"), [exec]);
+  const toggleUnderline = useCallback(() => exec("underline"), [exec]);
+  const toggleStrike = useCallback(() => exec("strikeThrough"), [exec]);
+
+  /* --- Undo / Redo — thin wrappers around execCommand so the toolbar
+         has clickable affordances; Ctrl+Z / Ctrl+Shift+Z still work
+         natively from the browser. --- */
+  const undo = useCallback(() => {
+    editorRef.current?.focus();
+    document.execCommand("undo");
+    flush();
+    updateFormats();
+  }, [flush, updateFormats]);
+  const redo = useCallback(() => {
+    editorRef.current?.focus();
+    document.execCommand("redo");
+    flush();
+    updateFormats();
+  }, [flush, updateFormats]);
+
+  /* --- Clear inline formatting on the current selection (bold, italic,
+         color, font-size spans). No selection → no-op, since removing
+         format from a collapsed caret has no meaning. --- */
+  const clearFormatting = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    editorRef.current?.focus();
+    document.execCommand("removeFormat");
+    // removeFormat leaves alignment / lists / headings alone — which is
+    // the behaviour most users want. Font-size <span> wrappers are
+    // stripped along with other inline styles.
+    flush();
+    updateFormats();
+  }, [flush, updateFormats]);
+
+  /* --- Blockquote toggle — wrap current block in <blockquote>, or
+         unwrap if already in one. --- */
+  const toggleQuote = useCallback(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    el.focus();
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const startEl = elNodeFromSelection(sel.anchorNode!);
+    const inQuote = startEl?.closest("blockquote") as HTMLElement | null;
+    if (inQuote) {
+      const parent = inQuote.parentNode;
+      if (!parent) return;
+      while (inQuote.firstChild) parent.insertBefore(inQuote.firstChild, inQuote);
+      parent.removeChild(inQuote);
+    } else {
+      document.execCommand("formatBlock", false, "blockquote");
+    }
+    flush();
+    updateFormats();
+  }, [flush, updateFormats]);
+
+  /* --- Link — prompt for a URL and wrap the selection. Without a
+         selection, prompt for a display label too and insert an anchor
+         at the caret. --- */
+  const insertLink = useCallback(async () => {
+    const url = await dialog.prompt({
+      title: "Insert link",
+      message: "URL",
+      placeholder: "https://",
+      okLabel: "Insert",
+    });
+    if (!url) return;
+    const safe = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    editorRef.current?.focus();
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) {
+      document.execCommand("createLink", false, safe);
+    } else {
+      document.execCommand(
+        "insertHTML",
+        false,
+        `<a href="${safe}" target="_blank" rel="noopener noreferrer">${safe}</a>`
+      );
+    }
+    flush();
+    updateFormats();
+  }, [dialog, flush, updateFormats]);
 
   /* --- Strike — REQUIRES selection. --- */
   /* --- Headings — three behaviors:
@@ -389,11 +531,20 @@ export default function Editor() {
     [flush, updateFormats]
   );
 
-  /* --- Alignment — REQUIRES selection. --- */
+  /* --- Alignment — applies to the current block (execCommand walks up
+         to the containing block itself) so it works with or without an
+         explicit selection. Requiring a selection was a footgun since
+         users expect a single-tap alignment on the paragraph containing
+         the caret. --- */
   const applyAlign = useCallback(
     (cmd: "justifyLeft" | "justifyCenter" | "justifyRight") => {
+      const el = editorRef.current;
+      if (!el) return;
+      el.focus();
       const sel = window.getSelection();
-      if (!sel || sel.isCollapsed) return;
+      if (!sel || sel.rangeCount === 0 || !el.contains(sel.anchorNode)) {
+        return;
+      }
       exec(cmd);
     },
     [exec]
@@ -420,14 +571,22 @@ export default function Editor() {
       const currentSize = anchor
         ? parseFloat(window.getComputedStyle(anchor).fontSize)
         : DEFAULT_FONT;
-      let idx = FONT_STEPS.findIndex(
-        (s) => Math.abs(s - currentSize) < 0.5 || s > currentSize
-      );
-      if (idx === -1) idx = FONT_STEPS.length - 1;
-      const next =
-        direction === 1
-          ? FONT_STEPS[Math.min(FONT_STEPS.length - 1, idx + 1)]
-          : FONT_STEPS[Math.max(0, idx - 1)];
+      // Step-picker: find the strictly-next / strictly-previous FONT_STEPS
+      // value relative to the current size. Handles two edge cases the
+      // previous nearest-index approach got wrong:
+      //   1) A caret sitting *between* two steps (e.g. size 15 between 14
+      //      and 16) used to skip a step on the way up.
+      //   2) A size larger than the last step (e.g. 60) used to stall on
+      //      up-press instead of clamping to the top.
+      let next: number;
+      if (direction === 1) {
+        const above = FONT_STEPS.find((s) => s > currentSize + 0.5);
+        next = above ?? FONT_STEPS[FONT_STEPS.length - 1];
+      } else {
+        const below = [...FONT_STEPS].reverse().find((s) => s < currentSize - 0.5);
+        next = below ?? FONT_STEPS[0];
+      }
+      if (next === Math.round(currentSize)) return; // no-op — already at boundary
 
       const span = document.createElement("span");
       span.style.fontSize = `${next}px`;
@@ -438,6 +597,12 @@ export default function Editor() {
         // Inserting *at* the caret means the span becomes a child of
         // the current inline parent (e.g. <b>), so bold/italic state
         // are preserved for anything the user types next.
+        // Capture any *pending* bold/italic (set via execCommand with no
+        // selection yet, so no <b>/<i> exists in the DOM). Inserting the
+        // span mutates the DOM around the caret and drops that pending
+        // state — re-apply after the caret moves into the new span.
+        const wasBold = document.queryCommandState("bold");
+        const wasItalic = document.queryCommandState("italic");
         const zws = document.createTextNode("​");
         span.appendChild(zws);
         range.insertNode(span);
@@ -446,6 +611,13 @@ export default function Editor() {
         r.collapse(true);
         sel.removeAllRanges();
         sel.addRange(r);
+        document.execCommand("styleWithCSS", false, "true");
+        if (wasBold && !document.queryCommandState("bold")) {
+          document.execCommand("bold");
+        }
+        if (wasItalic && !document.queryCommandState("italic")) {
+          document.execCommand("italic");
+        }
         flush();
         updateFormats();
         return;
@@ -661,6 +833,11 @@ export default function Editor() {
           toggleItalic();
           return;
         }
+        if (k === "u") {
+          e.preventDefault();
+          toggleUnderline();
+          return;
+        }
         if (k === "1" || k === "2" || k === "3") {
           e.preventDefault();
           applyHeading(`h${k}` as "h1" | "h2" | "h3");
@@ -760,6 +937,7 @@ export default function Editor() {
       updateFormats,
       toggleBold,
       toggleItalic,
+      toggleUnderline,
       applyHeading,
       file,
       syncToServer,
@@ -919,7 +1097,7 @@ export default function Editor() {
     .filter((w) => w.length > 0).length;
 
   return (
-    <div className="flex flex-col h-full fade-in">
+    <div className="relative flex flex-col h-full fade-in">
       {/* Sticky editor header — action row + format toolbar stay pinned to
           the top of the workspace so you never have to scroll up to reach
           a formatting button. */}
@@ -937,6 +1115,7 @@ export default function Editor() {
             <ChevronLeftIcon size={14} /> Files
           </button>
           <SyncBadge status={status} onRetry={retrySync} />
+          <ModeToggle mode={mode} setMode={setMode} />
           {/* Pomodoro timer — absolute-centered over the action row so
               it always sits in the top-middle regardless of how long
               the left / right button clusters get. */}
@@ -987,21 +1166,32 @@ export default function Editor() {
           </button>
         </div>
 
-        <FormatToolbar
-          formats={formats}
-          toggleBold={toggleBold}
-          toggleItalic={toggleItalic}
-          applyHeading={applyHeading}
-          applyAlign={applyAlign}
-          adjustFont={adjustFont}
-          insertCodeBlock={insertCodeBlock}
-          insertList={insertList}
-          insertDivider={insertDivider}
-          wordCount={wordCount}
-        />
-
+        {mode === "text" && (
+          <FormatToolbar
+            formats={formats}
+            toggleBold={toggleBold}
+            toggleItalic={toggleItalic}
+            toggleUnderline={toggleUnderline}
+            toggleStrike={toggleStrike}
+            toggleQuote={toggleQuote}
+            applyHeading={applyHeading}
+            applyAlign={applyAlign}
+            adjustFont={adjustFont}
+            insertCodeBlock={insertCodeBlock}
+            insertList={insertList}
+            insertDivider={insertDivider}
+            insertLink={insertLink}
+            clearFormatting={clearFormatting}
+            undo={undo}
+            redo={redo}
+            wordCount={wordCount}
+          />
+        )}
       </div>
 
+      {/* Text editor — kept mounted at all times so its innerHTML stays
+          available as the source-of-truth for flushes; visually hidden
+          (not `display:none`, which would blur the caret) in draw mode. */}
       <div
         ref={editorRef}
         contentEditable
@@ -1014,12 +1204,57 @@ export default function Editor() {
         onClick={onEditorClick}
         spellCheck={false}
         data-placeholder="Start writing..."
-        className="rich-editor text-sm leading-7 flex-1 px-8 pt-6 pb-12 outline-none overflow-y-auto"
+        className={`rich-editor text-sm leading-7 flex-1 px-8 pt-6 pb-12 outline-none overflow-y-auto ${
+          mode === "draw" ? "hidden" : ""
+        }`}
       />
 
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[var(--muted)] opacity-60 pointer-events-none">
-        <ArrowDownIcon size={18} />
-      </div>
+      {mode === "draw" && (
+        <DrawCanvas drawing={drawingState} onChange={onDrawingChange} />
+      )}
+
+      {mode === "text" && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[var(--muted)] opacity-60 pointer-events-none">
+          <ArrowDownIcon size={18} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ModeToggle({
+  mode,
+  setMode,
+}: {
+  mode: "text" | "draw";
+  setMode: (m: "text" | "draw") => void;
+}) {
+  return (
+    <div className="inline-flex items-center rounded-xl border border-[var(--border)] p-0.5 text-xs">
+      <button
+        type="button"
+        onClick={() => setMode("text")}
+        className={`px-3 py-1.5 rounded-lg transition ${
+          mode === "text"
+            ? "bg-[var(--foreground)] text-[var(--surface)]"
+            : "text-[var(--muted)] hover:text-[var(--foreground)]"
+        }`}
+        aria-pressed={mode === "text"}
+      >
+        Text
+      </button>
+      <button
+        type="button"
+        onClick={() => setMode("draw")}
+        className={`px-3 py-1.5 rounded-lg transition ${
+          mode === "draw"
+            ? "bg-[var(--foreground)] text-[var(--surface)]"
+            : "text-[var(--muted)] hover:text-[var(--foreground)]"
+        }`}
+        aria-pressed={mode === "draw"}
+      >
+        Draw
+      </button>
     </div>
   );
 }
@@ -1187,23 +1422,37 @@ function FormatToolbar({
   formats,
   toggleBold,
   toggleItalic,
+  toggleUnderline,
+  toggleStrike,
+  toggleQuote,
   applyHeading,
   applyAlign,
   adjustFont,
   insertCodeBlock,
   insertList,
   insertDivider,
+  insertLink,
+  clearFormatting,
+  undo,
+  redo,
   wordCount,
 }: {
   formats: Formats;
   toggleBold: () => void;
   toggleItalic: () => void;
+  toggleUnderline: () => void;
+  toggleStrike: () => void;
+  toggleQuote: () => void;
   applyHeading: (tag: "h1" | "h2" | "h3") => void;
   applyAlign: (cmd: "justifyLeft" | "justifyCenter" | "justifyRight") => void;
   adjustFont: (dir: 1 | -1) => void;
   insertCodeBlock: () => void;
   insertList: (kind: "cb" | "rb" | "ul" | "ol") => void;
   insertDivider: (kind: "line" | "dots" | "block") => void;
+  insertLink: () => void;
+  clearFormatting: () => void;
+  undo: () => void;
+  redo: () => void;
   wordCount: number;
 }) {
   return (
@@ -1213,15 +1462,29 @@ function FormatToolbar({
       </span>
 
       <TbGroup>
-        <TbButton title="Bold" active={formats.bold} onClick={toggleBold}>
+        <TbButton title="Bold (Ctrl+B)" active={formats.bold} onClick={toggleBold}>
           <span className="font-bold">B</span>
         </TbButton>
         <TbButton
-          title="Italic"
+          title="Italic (Ctrl+I)"
           active={formats.italic}
           onClick={toggleItalic}
         >
           <span className="italic font-serif">I</span>
+        </TbButton>
+        <TbButton
+          title="Underline (Ctrl+U)"
+          active={formats.underline}
+          onClick={toggleUnderline}
+        >
+          <span className="underline">U</span>
+        </TbButton>
+        <TbButton
+          title="Strikethrough"
+          active={formats.strike}
+          onClick={toggleStrike}
+        >
+          <span className="line-through">S</span>
         </TbButton>
       </TbGroup>
 
@@ -1344,6 +1607,31 @@ function FormatToolbar({
         </TbButton>
         <TbButton title="Dashed divider" onClick={() => insertDivider("block")}>
           <DividerGlyph kind="block" />
+        </TbButton>
+      </TbGroup>
+
+      <TbGroup>
+        <TbButton
+          title="Blockquote"
+          active={formats.inQuote}
+          onClick={toggleQuote}
+        >
+          <QuoteGlyph />
+        </TbButton>
+        <TbButton title="Insert link" onClick={insertLink}>
+          <LinkGlyph />
+        </TbButton>
+        <TbButton title="Clear formatting" onClick={clearFormatting}>
+          <ClearFormatGlyph />
+        </TbButton>
+      </TbGroup>
+
+      <TbGroup>
+        <TbButton title="Undo (Ctrl+Z)" onClick={undo}>
+          <UndoGlyph />
+        </TbButton>
+        <TbButton title="Redo (Ctrl+Shift+Z)" onClick={redo}>
+          <RedoGlyph />
         </TbButton>
       </TbGroup>
 
@@ -1535,6 +1823,87 @@ function SyncBadge({
     >
       <CheckIcon size={11} /> Saved
     </span>
+  );
+}
+
+function QuoteGlyph() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M6 7c-2 1-3 3-3 6h3v4H3v-6c0-2 1-3 3-4zm8 0c-2 1-3 3-3 6h3v4h-3v-6c0-2 1-3 3-4z" />
+    </svg>
+  );
+}
+
+function LinkGlyph() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+    >
+      <path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66L11 7" />
+      <path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66L13 17" />
+    </svg>
+  );
+}
+
+function ClearFormatGlyph() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 7h12" />
+      <path d="M9 7l-3 12" />
+      <path d="M13 7l-2 8" />
+      <path d="M15 18l6-6M15 12l6 6" />
+    </svg>
+  );
+}
+
+function UndoGlyph() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 10h11a5 5 0 0 1 0 10H8" />
+      <path d="M7 6l-4 4 4 4" />
+    </svg>
+  );
+}
+
+function RedoGlyph() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 10H10a5 5 0 0 0 0 10h6" />
+      <path d="M17 6l4 4-4 4" />
+    </svg>
   );
 }
 

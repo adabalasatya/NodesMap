@@ -72,6 +72,10 @@ export default function Sidebar() {
     };
   }, [settingsOpen]);
 
+  // When the app navigates into a nested folder, expand every ancestor
+  // so the current folder is visible in the tree. This is a genuine
+  // "external state changed → sync local UI state" pattern (the store
+  // is the external source), so setState-in-effect is appropriate.
   useEffect(() => {
     if (state.currentFolderId) {
       const ancestors: string[] = [];
@@ -81,6 +85,7 @@ export default function Sidebar() {
         const f = state.folders.find((x) => x.id === id);
         id = f?.parentId ?? null;
       }
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOpen((o) => {
         const next = { ...o };
         ancestors.forEach((a) => (next[a] = true));

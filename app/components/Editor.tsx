@@ -22,12 +22,6 @@ import {
   TrashIcon,
 } from "./icons";
 import PomodoroTimer from "./PomodoroTimer";
-import DrawCanvas from "./DrawCanvas";
-import {
-  extractDrawing,
-  embedDrawing,
-  type Drawing,
-} from "../lib/drawStore";
 
 const SYNC_DEBOUNCE_MS = 5_000;
 type SaveStatus = "saved" | "editing" | "syncing" | "failed";
@@ -51,7 +45,6 @@ type Formats = {
   cb: boolean;
   rb: boolean;
   inCode: boolean;
-  inQuote: boolean;
   fontSize: number;
 };
 
@@ -71,7 +64,6 @@ const emptyFormats: Formats = {
   cb: false,
   rb: false,
   inCode: false,
-  inQuote: false,
   fontSize: DEFAULT_FONT,
 };
 
@@ -95,31 +87,14 @@ export default function Editor() {
 
   // Compute the HTML to load: a localStorage draft (if present) wins over
   // the Supabase-synced content, since the draft is by definition newer.
-  // The stored string may end in an embedded drawing comment which we
-  // strip so the editor never sees it (it's the canvas's job to render
-  // that portion).
-  const { initialHtml, initialDrawing } = useMemo(() => {
-    if (!file) return { initialHtml: "", initialDrawing: { shapes: [] } as Drawing };
+  const initialHtml = useMemo(() => {
+    if (!file) return "";
     const draft = readDraft(file.id);
     const source = draft?.content ?? file.content ?? "";
-    if (!source) return { initialHtml: "", initialDrawing: { shapes: [] } as Drawing };
-    const { html, drawing } = extractDrawing(source);
-    const isHtml = /<[a-z][^>]*>/i.test(html);
-    return {
-      initialHtml: isHtml ? html : renderMarkdown(html),
-      initialDrawing: drawing,
-    };
+    if (!source) return "";
+    if (/<[a-z][^>]*>/i.test(source)) return source;
+    return renderMarkdown(source);
   }, [file?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Current drawing kept in a ref so the text-flush path can round-trip it
-  // untouched, and in state so React re-renders when the canvas edits it.
-  const [drawingState, setDrawingState] = useState<Drawing>(initialDrawing);
-  const drawingRef = useRef<Drawing>(initialDrawing);
-  useEffect(() => {
-    drawingRef.current = drawingState;
-  }, [drawingState]);
-
-  const [mode, setMode] = useState<"text" | "draw">("text");
 
   // Did we load from a draft on open? Reflect that in the status badge.
   const initialStatus = useMemo<SaveStatus>(() => {
@@ -132,14 +107,7 @@ export default function Editor() {
     if (loadedFileId.current === file.id) return;
     loadedFileId.current = file.id;
     editorRef.current.innerHTML = initialHtml;
-    // Sync the drawing state and ref together with the text HTML so all
-    // three views of the file (editor, canvas, saved-content baseline)
-    // agree on what "no user edit yet" looks like.
-    setDrawingState(initialDrawing);
-    drawingRef.current = initialDrawing;
-    // Store the *combined* (text + drawing) form so the next flush
-    // correctly considers this a no-op unless the user actually edits.
-    lastWrittenContent.current = embedDrawing(initialHtml, initialDrawing);
+    lastWrittenContent.current = initialHtml;
     setStatus(initialStatus);
     editorRef.current.focus();
     // If we loaded a draft, hydrate in-memory state so other views see the
@@ -151,7 +119,7 @@ export default function Editor() {
         payload: { id: file.id, content: draft.content },
       });
     }
-  }, [file, initialHtml, initialDrawing, initialStatus, dispatch]);
+  }, [file, initialHtml, initialStatus, dispatch]);
 
   // Push the latest content of `fileId` to Supabase. Returns true on a
   // confirmed save (draft cleared); false otherwise (draft preserved so a
@@ -204,39 +172,21 @@ export default function Editor() {
   );
 
   // Editor input → write draft instantly, dispatch in-memory state, status
-  // "editing", reset the 30-second timer. Persist the current drawing at
-  // the tail of the content so it round-trips through Supabase alongside
-  // the text HTML.
+  // "editing", reset the 30-second timer.
   const flush = useCallback(() => {
     const el = editorRef.current;
-    if (!file) return;
-    const html = el ? el.innerHTML : "";
-    const combined = embedDrawing(html, drawingRef.current);
-    if (combined === lastWrittenContent.current) return;
-    lastWrittenContent.current = combined;
-    writeDraft(file.id, combined);
+    if (!el || !file) return;
+    const html = el.innerHTML;
+    if (html === lastWrittenContent.current) return;
+    lastWrittenContent.current = html;
+    writeDraft(file.id, html);
     dispatch({
       type: "UPDATE_FILE",
-      payload: { id: file.id, content: combined },
+      payload: { id: file.id, content: html },
     });
     setStatus("editing");
     armDebounce(file.id);
   }, [dispatch, file, armDebounce]);
-
-  // Draw-canvas edits: update local state, then flush to storage. The
-  // text editor's innerHTML is preserved; only the tail-embedded drawing
-  // changes.
-  const onDrawingChange = useCallback(
-    (next: Drawing) => {
-      setDrawingState(next);
-      drawingRef.current = next;
-      // Defer the flush so React commits state before we read innerHTML
-      // (which is unchanged in draw mode, but flush() is what triggers
-      // the debounced Supabase sync).
-      queueMicrotask(() => flush());
-    },
-    [flush]
-  );
 
   // Manual retry hook for the failed state.
   const retrySync = useCallback(async () => {
@@ -341,7 +291,6 @@ export default function Editor() {
       cb: !!elNode?.closest?.("ul.cb-list"),
       rb: !!elNode?.closest?.("ul.rb-list"),
       inCode: !!elNode?.closest?.("pre, code"),
-      inQuote: !!elNode?.closest?.("blockquote"),
       fontSize: computedSize || DEFAULT_FONT,
     });
   }, []);
@@ -386,70 +335,6 @@ export default function Editor() {
     flush();
     updateFormats();
   }, [flush, updateFormats]);
-
-  /* --- Clear inline formatting on the current selection (bold, italic,
-         color, font-size spans). No selection → no-op, since removing
-         format from a collapsed caret has no meaning. --- */
-  const clearFormatting = useCallback(() => {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed) return;
-    editorRef.current?.focus();
-    document.execCommand("removeFormat");
-    // removeFormat leaves alignment / lists / headings alone — which is
-    // the behaviour most users want. Font-size <span> wrappers are
-    // stripped along with other inline styles.
-    flush();
-    updateFormats();
-  }, [flush, updateFormats]);
-
-  /* --- Blockquote toggle — wrap current block in <blockquote>, or
-         unwrap if already in one. --- */
-  const toggleQuote = useCallback(() => {
-    const el = editorRef.current;
-    if (!el) return;
-    el.focus();
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
-    const startEl = elNodeFromSelection(sel.anchorNode!);
-    const inQuote = startEl?.closest("blockquote") as HTMLElement | null;
-    if (inQuote) {
-      const parent = inQuote.parentNode;
-      if (!parent) return;
-      while (inQuote.firstChild) parent.insertBefore(inQuote.firstChild, inQuote);
-      parent.removeChild(inQuote);
-    } else {
-      document.execCommand("formatBlock", false, "blockquote");
-    }
-    flush();
-    updateFormats();
-  }, [flush, updateFormats]);
-
-  /* --- Link — prompt for a URL and wrap the selection. Without a
-         selection, prompt for a display label too and insert an anchor
-         at the caret. --- */
-  const insertLink = useCallback(async () => {
-    const url = await dialog.prompt({
-      title: "Insert link",
-      message: "URL",
-      placeholder: "https://",
-      okLabel: "Insert",
-    });
-    if (!url) return;
-    const safe = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-    editorRef.current?.focus();
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) {
-      document.execCommand("createLink", false, safe);
-    } else {
-      document.execCommand(
-        "insertHTML",
-        false,
-        `<a href="${safe}" target="_blank" rel="noopener noreferrer">${safe}</a>`
-      );
-    }
-    flush();
-    updateFormats();
-  }, [dialog, flush, updateFormats]);
 
   /* --- Strike — REQUIRES selection. --- */
   /* --- Headings — three behaviors:
@@ -1115,7 +1000,6 @@ export default function Editor() {
             <ChevronLeftIcon size={14} /> Files
           </button>
           <SyncBadge status={status} onRetry={retrySync} />
-          <ModeToggle mode={mode} setMode={setMode} />
           {/* Pomodoro timer — absolute-centered over the action row so
               it always sits in the top-middle regardless of how long
               the left / right button clusters get. */}
@@ -1166,32 +1050,24 @@ export default function Editor() {
           </button>
         </div>
 
-        {mode === "text" && (
-          <FormatToolbar
-            formats={formats}
-            toggleBold={toggleBold}
-            toggleItalic={toggleItalic}
-            toggleUnderline={toggleUnderline}
-            toggleStrike={toggleStrike}
-            toggleQuote={toggleQuote}
-            applyHeading={applyHeading}
-            applyAlign={applyAlign}
-            adjustFont={adjustFont}
-            insertCodeBlock={insertCodeBlock}
-            insertList={insertList}
-            insertDivider={insertDivider}
-            insertLink={insertLink}
-            clearFormatting={clearFormatting}
-            undo={undo}
-            redo={redo}
-            wordCount={wordCount}
-          />
-        )}
+        <FormatToolbar
+          formats={formats}
+          toggleBold={toggleBold}
+          toggleItalic={toggleItalic}
+          toggleUnderline={toggleUnderline}
+          toggleStrike={toggleStrike}
+          applyHeading={applyHeading}
+          applyAlign={applyAlign}
+          adjustFont={adjustFont}
+          insertCodeBlock={insertCodeBlock}
+          insertList={insertList}
+          insertDivider={insertDivider}
+          undo={undo}
+          redo={redo}
+          wordCount={wordCount}
+        />
       </div>
 
-      {/* Text editor — kept mounted at all times so its innerHTML stays
-          available as the source-of-truth for flushes; visually hidden
-          (not `display:none`, which would blur the caret) in draw mode. */}
       <div
         ref={editorRef}
         contentEditable
@@ -1204,57 +1080,12 @@ export default function Editor() {
         onClick={onEditorClick}
         spellCheck={false}
         data-placeholder="Start writing..."
-        className={`rich-editor text-sm leading-7 flex-1 px-8 pt-6 pb-12 outline-none overflow-y-auto ${
-          mode === "draw" ? "hidden" : ""
-        }`}
+        className="rich-editor text-sm leading-7 flex-1 px-8 pt-6 pb-12 outline-none overflow-y-auto"
       />
 
-      {mode === "draw" && (
-        <DrawCanvas drawing={drawingState} onChange={onDrawingChange} />
-      )}
-
-      {mode === "text" && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[var(--muted)] opacity-60 pointer-events-none">
-          <ArrowDownIcon size={18} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ModeToggle({
-  mode,
-  setMode,
-}: {
-  mode: "text" | "draw";
-  setMode: (m: "text" | "draw") => void;
-}) {
-  return (
-    <div className="inline-flex items-center rounded-xl border border-[var(--border)] p-0.5 text-xs">
-      <button
-        type="button"
-        onClick={() => setMode("text")}
-        className={`px-3 py-1.5 rounded-lg transition ${
-          mode === "text"
-            ? "bg-[var(--foreground)] text-[var(--surface)]"
-            : "text-[var(--muted)] hover:text-[var(--foreground)]"
-        }`}
-        aria-pressed={mode === "text"}
-      >
-        Text
-      </button>
-      <button
-        type="button"
-        onClick={() => setMode("draw")}
-        className={`px-3 py-1.5 rounded-lg transition ${
-          mode === "draw"
-            ? "bg-[var(--foreground)] text-[var(--surface)]"
-            : "text-[var(--muted)] hover:text-[var(--foreground)]"
-        }`}
-        aria-pressed={mode === "draw"}
-      >
-        Draw
-      </button>
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[var(--muted)] opacity-60 pointer-events-none">
+        <ArrowDownIcon size={18} />
+      </div>
     </div>
   );
 }
@@ -1424,15 +1255,12 @@ function FormatToolbar({
   toggleItalic,
   toggleUnderline,
   toggleStrike,
-  toggleQuote,
   applyHeading,
   applyAlign,
   adjustFont,
   insertCodeBlock,
   insertList,
   insertDivider,
-  insertLink,
-  clearFormatting,
   undo,
   redo,
   wordCount,
@@ -1442,15 +1270,12 @@ function FormatToolbar({
   toggleItalic: () => void;
   toggleUnderline: () => void;
   toggleStrike: () => void;
-  toggleQuote: () => void;
   applyHeading: (tag: "h1" | "h2" | "h3") => void;
   applyAlign: (cmd: "justifyLeft" | "justifyCenter" | "justifyRight") => void;
   adjustFont: (dir: 1 | -1) => void;
   insertCodeBlock: () => void;
   insertList: (kind: "cb" | "rb" | "ul" | "ol") => void;
   insertDivider: (kind: "line" | "dots" | "block") => void;
-  insertLink: () => void;
-  clearFormatting: () => void;
   undo: () => void;
   redo: () => void;
   wordCount: number;
@@ -1607,22 +1432,6 @@ function FormatToolbar({
         </TbButton>
         <TbButton title="Dashed divider" onClick={() => insertDivider("block")}>
           <DividerGlyph kind="block" />
-        </TbButton>
-      </TbGroup>
-
-      <TbGroup>
-        <TbButton
-          title="Blockquote"
-          active={formats.inQuote}
-          onClick={toggleQuote}
-        >
-          <QuoteGlyph />
-        </TbButton>
-        <TbButton title="Insert link" onClick={insertLink}>
-          <LinkGlyph />
-        </TbButton>
-        <TbButton title="Clear formatting" onClick={clearFormatting}>
-          <ClearFormatGlyph />
         </TbButton>
       </TbGroup>
 
@@ -1823,51 +1632,6 @@ function SyncBadge({
     >
       <CheckIcon size={11} /> Saved
     </span>
-  );
-}
-
-function QuoteGlyph() {
-  return (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M6 7c-2 1-3 3-3 6h3v4H3v-6c0-2 1-3 3-4zm8 0c-2 1-3 3-3 6h3v4h-3v-6c0-2 1-3 3-4z" />
-    </svg>
-  );
-}
-
-function LinkGlyph() {
-  return (
-    <svg
-      width={14}
-      height={14}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-    >
-      <path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66L11 7" />
-      <path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66L13 17" />
-    </svg>
-  );
-}
-
-function ClearFormatGlyph() {
-  return (
-    <svg
-      width={14}
-      height={14}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M4 7h12" />
-      <path d="M9 7l-3 12" />
-      <path d="M13 7l-2 8" />
-      <path d="M15 18l6-6M15 12l6 6" />
-    </svg>
   );
 }
 

@@ -829,6 +829,42 @@ export default function Editor() {
     ]
   );
 
+  /* Paste — sanitise incoming HTML so pasted syntax-highlighted code
+     (from VS Code / GitHub / etc.) does not drag its own theme colours
+     into the note. We strip inline `style`, `class`, `bgcolor`, and
+     `color` attributes; leave tag structure intact so <pre><code>
+     paste still lands as a proper code block. Plain-text paste (Cmd+
+     Shift+V) is untouched — the browser handles it natively. */
+  const onPaste = useCallback(
+    (e: React.ClipboardEvent<HTMLDivElement>) => {
+      const html = e.clipboardData.getData("text/html");
+      const text = e.clipboardData.getData("text/plain");
+      if (!html) {
+        // No rich payload — let the default plain-text path run.
+        return;
+      }
+      e.preventDefault();
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      doc.body
+        .querySelectorAll<HTMLElement>("[style], [class], [bgcolor], [color]")
+        .forEach((n) => {
+          n.removeAttribute("style");
+          n.removeAttribute("class");
+          n.removeAttribute("bgcolor");
+          n.removeAttribute("color");
+        });
+      // Drop <script>, <style>, and Office/Google-Docs junk wrappers.
+      doc.body
+        .querySelectorAll("script, style, meta, link, o\\:p")
+        .forEach((n) => n.remove());
+      const sanitized = doc.body.innerHTML || text;
+      document.execCommand("insertHTML", false, sanitized);
+      flush();
+      updateFormats();
+    },
+    [flush, updateFormats]
+  );
+
   /* Background click in the editor — place the caret where the user
      actually tapped (above / below / between blocks), not at the
      bottom. We map the click coordinates to a caret position via
@@ -1078,6 +1114,7 @@ export default function Editor() {
         onKeyUp={updateFormats}
         onMouseUp={updateFormats}
         onClick={onEditorClick}
+        onPaste={onPaste}
         spellCheck={false}
         data-placeholder="Start writing..."
         className="rich-editor text-sm leading-7 flex-1 px-8 pt-6 pb-12 outline-none overflow-y-auto"

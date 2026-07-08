@@ -245,15 +245,30 @@ body {
   font-size: 0.9em;
 }
 .rich-editor pre {
-  background: var(--surface-2);
+  /* !important overrides inline background captured on paste — e.g. code
+     copied from VS Code / an IDE while the user was in dark mode carries
+     a dark inline `background`, which used to make the pre stay dark
+     even after switching the app back to light. */
+  background: var(--surface-2) !important;
+  color: var(--foreground) !important;
   padding: 0.85rem 1rem;
   border-radius: 8px;
   overflow-x: auto;
   margin: 0.6rem 0;
   font-family: var(--font-geist-mono), ui-monospace, monospace;
 }
-.rich-editor pre code {
-  background: transparent;
+.rich-editor pre code,
+.rich-editor pre span,
+.rich-editor pre b,
+.rich-editor pre i,
+.rich-editor pre strong,
+.rich-editor pre em,
+.rich-editor pre div {
+  /* Same reason as above — pasted syntax-highlighted spans often carry
+     inline background/color; strip both so the code block follows the
+     current theme instead of the source's colour scheme. */
+  background: transparent !important;
+  color: inherit !important;
   padding: 0;
 }
 .rich-editor blockquote {

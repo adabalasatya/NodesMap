@@ -30,6 +30,12 @@ import { useTheme } from "../lib/theme";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import { useDialog } from "./Dialog";
 import { useLoading } from "./LoadingOverlay";
+import {
+  readDragItem,
+  setDragItem,
+  hasNodesMapPayload,
+  type DragItem,
+} from "../lib/dnd";
 
 export default function Sidebar() {
   const { state, dispatch, sync, syncError, retrySync } = useStore();
@@ -50,6 +56,55 @@ export default function Sidebar() {
   } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
+  // Drop-target highlighting: the id of the folder currently under the
+  // cursor during a drag, or "__root__" for the empty tree area. Stored
+  // as a plain string so the render path can compare cheaply.
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  const isDescendantOf = (candidateAncestorId: string, folderId: string) => {
+    let cur: string | null | undefined = folderId;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur)) {
+      if (cur === candidateAncestorId) return true;
+      seen.add(cur);
+      cur = state.folders.find((f) => f.id === cur)?.parentId ?? null;
+    }
+    return false;
+  };
+
+  // Returns true when `item` can legally land on a folder-drop-target
+  // whose id is `targetFolderId` (null = tree root). Folders can't drop
+  // onto themselves or into their own descendants, and files can't drop
+  // onto their current folder.
+  const canDropOn = (item: DragItem, targetFolderId: string | null): boolean => {
+    if (item.kind === "folder") {
+      if (item.id === targetFolderId) return false;
+      const currentParent = state.folders.find((f) => f.id === item.id)?.parentId ?? null;
+      if (currentParent === targetFolderId) return false;
+      if (targetFolderId && isDescendantOf(item.id, targetFolderId)) return false;
+      return true;
+    }
+    // file
+    if (targetFolderId === null) return false; // files must live inside a folder
+    const currentFolder = state.files.find((f) => f.id === item.id)?.folderId;
+    return currentFolder !== targetFolderId;
+  };
+
+  const performDrop = (item: DragItem, targetFolderId: string | null) => {
+    if (!canDropOn(item, targetFolderId)) return;
+    if (item.kind === "folder") {
+      dispatch({
+        type: "MOVE_FOLDER",
+        payload: { id: item.id, parentId: targetFolderId },
+      });
+    } else {
+      if (targetFolderId === null) return;
+      dispatch({
+        type: "MOVE_FILE",
+        payload: { id: item.id, folderId: targetFolderId },
+      });
+    }
+  };
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -199,11 +254,44 @@ export default function Sidebar() {
     const isSelected =
       state.currentFolderId === folder.id && state.view !== "dashboard";
     const { total, done } = selectFolderProgressDeep(state, folder.id);
+    const isDropHover = dropTarget === folder.id;
     return (
       <div key={folder.id} className="mb-0.5">
         <div
+          draggable
+          onDragStart={(e) => {
+            setDragItem(e.dataTransfer, { kind: "folder", id: folder.id });
+          }}
+          onDragEnd={() => setDropTarget(null)}
+          onDragOver={(e) => {
+            if (!hasNodesMapPayload(e.dataTransfer)) return;
+            // preventDefault here is what actually enables a drop target;
+            // without it the browser refuses to fire `drop`.
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            if (dropTarget !== folder.id) setDropTarget(folder.id);
+          }}
+          onDragLeave={(e) => {
+            // Only clear if the cursor really left this element — the
+            // event fires spuriously as we move over child nodes.
+            const related = e.relatedTarget as Node | null;
+            if (related && e.currentTarget.contains(related)) return;
+            if (dropTarget === folder.id) setDropTarget(null);
+          }}
+          onDrop={(e) => {
+            const item = readDragItem(e.dataTransfer);
+            setDropTarget(null);
+            if (!item) return;
+            e.preventDefault();
+            e.stopPropagation();
+            performDrop(item, folder.id);
+            // Expand the target so the user immediately sees what they moved.
+            setOpen((o) => ({ ...o, [folder.id]: true }));
+          }}
           className={`group flex items-center gap-1.5 rounded-lg px-2 py-2 cursor-pointer transition ${
-            isSelected
+            isDropHover
+              ? "ring-2 ring-[var(--accent)] bg-[var(--surface-2)]"
+              : isSelected
               ? "bg-[var(--surface-2)] text-[var(--foreground)]"
               : "hover:bg-[var(--surface-2)]"
           }`}
@@ -339,6 +427,10 @@ export default function Sidebar() {
               return (
                 <div
                   key={file.id}
+                  draggable
+                  onDragStart={(e) => {
+                    setDragItem(e.dataTransfer, { kind: "file", id: file.id });
+                  }}
                   onClick={() =>
                     dispatch({
                       type: "SET_VIEW",
@@ -523,6 +615,36 @@ export default function Sidebar() {
           </div>
         )}
         {visibleRoots.map((folder) => renderFolder(folder, 0))}
+        {/* Drop target for un-nesting a folder to the tree root. Only
+            highlights when a folder payload is being dragged; files
+            cannot live at the root and are silently rejected. */}
+        <div
+          onDragOver={(e) => {
+            if (!hasNodesMapPayload(e.dataTransfer)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            if (dropTarget !== "__root__") setDropTarget("__root__");
+          }}
+          onDragLeave={(e) => {
+            const related = e.relatedTarget as Node | null;
+            if (related && e.currentTarget.contains(related)) return;
+            if (dropTarget === "__root__") setDropTarget(null);
+          }}
+          onDrop={(e) => {
+            const item = readDragItem(e.dataTransfer);
+            setDropTarget(null);
+            if (!item) return;
+            e.preventDefault();
+            performDrop(item, null);
+          }}
+          className={`mt-2 mx-2 min-h-14 rounded-lg text-[10px] flex items-center justify-center border border-dashed transition ${
+            dropTarget === "__root__"
+              ? "border-[var(--accent)] text-[var(--accent)] bg-[var(--surface-2)]"
+              : "border-transparent text-transparent"
+          }`}
+        >
+          Drop here to move to root
+        </div>
       </div>
 
       {/* Sync status (compact) */}

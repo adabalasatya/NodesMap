@@ -58,8 +58,17 @@ function walk(el: Node, depth = 0): string {
       // <pre><code> handled below
       if (e.parentElement?.tagName.toLowerCase() === "pre") return children();
       return `\`${children()}\``;
-    case "pre":
-      return `\n\`\`\`\n${(e.textContent ?? "").replace(/\n+$/, "")}\n\`\`\`\n\n`;
+    case "pre": {
+      // Read from the inner <code> child (if present) so any UI-only
+      // chip like the editor's Text/Code toggle never gets serialised
+      // into the exported markdown.
+      const codeEl = e.querySelector(":scope > code");
+      const raw = (codeEl?.textContent ?? e.textContent ?? "").replace(
+        /\n+$/,
+        ""
+      );
+      return `\n\`\`\`\n${raw}\n\`\`\`\n\n`;
+    }
     case "a": {
       const href = e.getAttribute("href") ?? "";
       return `[${children()}](${href})`;

@@ -67,6 +67,61 @@ const emptyFormats: Formats = {
   fontSize: DEFAULT_FONT,
 };
 
+type CodeMode = "text" | "code";
+const CODE_INDENT = "    "; // 4 spaces — matches the Tab handler
+
+/** Build the Text/Code toggle chip that sits at the top-right of every
+    <pre>. Kept as a plain DOM builder (not a React component) so it can
+    live inside a contentEditable without needing a portal. */
+function createPreToolbar(mode: CodeMode): HTMLDivElement {
+  const tb = document.createElement("div");
+  tb.className = "pre-tb";
+  tb.setAttribute("contenteditable", "false");
+  (["text", "code"] as const).forEach((k) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = k === "text" ? "Text" : "Code";
+    b.dataset.preMode = k;
+    if (k === mode) b.classList.add("active");
+    tb.appendChild(b);
+  });
+  return tb;
+}
+
+/** Walk the editor root and ensure every <pre> has a toolbar and a
+    valid data-code-mode attribute. Idempotent so it can run on load,
+    on paste, and after any external mutation. */
+function ensurePreToolbars(root: HTMLElement) {
+  root.querySelectorAll("pre").forEach((pre) => {
+    const mode: CodeMode =
+      pre.dataset.codeMode === "code" ? "code" : "text";
+    pre.dataset.codeMode = mode;
+    const existing = pre.querySelector(":scope > .pre-tb");
+    if (!existing) {
+      pre.insertBefore(createPreToolbar(mode), pre.firstChild);
+    }
+  });
+}
+
+/** Strip toolbars before writing to store so the persisted HTML stays
+    clean (and the Markdown exporter never sees toolbar button text). */
+function stripPreToolbars(html: string): string {
+  if (!html.includes("pre-tb")) return html;
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  doc.body.querySelectorAll(".pre-tb").forEach((n) => n.remove());
+  return doc.body.innerHTML;
+}
+
+/** Auto-pair map used by the Code mode key handler. */
+const CODE_PAIRS: Record<string, string> = {
+  "{": "}",
+  "[": "]",
+  "(": ")",
+  '"': '"',
+  "'": "'",
+  "`": "`",
+};
+
 export default function Editor() {
   const { state, dispatch } = useStore();
   const { user } = useAuth();
@@ -107,6 +162,10 @@ export default function Editor() {
     if (loadedFileId.current === file.id) return;
     loadedFileId.current = file.id;
     editorRef.current.innerHTML = initialHtml;
+    // Inject the Text/Code toggle into every stored <pre>. The toolbar
+    // itself is UI-only and gets stripped again on flush, so it never
+    // leaks into the persisted HTML.
+    ensurePreToolbars(editorRef.current);
     lastWrittenContent.current = initialHtml;
     setStatus(initialStatus);
     editorRef.current.focus();
@@ -176,7 +235,13 @@ export default function Editor() {
   const flush = useCallback(() => {
     const el = editorRef.current;
     if (!el || !file) return;
-    const html = el.innerHTML;
+    // Heal any <pre> that entered the DOM without a toolbar (paste,
+    // insertHTML from execCommand list operations, undo/redo, etc.).
+    // Idempotent — no-op when every <pre> already has one.
+    ensurePreToolbars(el);
+    // Strip the Text/Code toggle chip so the persisted HTML stays clean.
+    // The toggle is re-injected on next load via ensurePreToolbars.
+    const html = stripPreToolbars(el.innerHTML);
     if (html === lastWrittenContent.current) return;
     lastWrittenContent.current = html;
     writeDraft(file.id, html);
@@ -546,6 +611,8 @@ export default function Editor() {
     const sel = window.getSelection();
 
     const pre = document.createElement("pre");
+    pre.dataset.codeMode = "text";
+    pre.appendChild(createPreToolbar("text"));
     const code = document.createElement("code");
     code.textContent = "#";
     pre.appendChild(code);
@@ -756,6 +823,115 @@ export default function Editor() {
         return;
       }
 
+      // Code-mode niceties: auto-pair brackets/quotes, delete empty pairs
+      // on Backspace, and preserve indentation on Enter. Runs before the
+      // Enter-only bail-out so these fire for every key that hits an
+      // active code block. Text mode ignores everything and falls
+      // through to the browser's default keystroke handling.
+      const selEarly = window.getSelection();
+      if (selEarly && selEarly.rangeCount > 0) {
+        const anchorEarly = selEarly.anchorNode;
+        const startElEarly = anchorEarly
+          ? elNodeFromSelection(anchorEarly)
+          : null;
+        const preEarly = startElEarly?.closest("pre");
+        if (preEarly && preEarly.dataset.codeMode === "code") {
+          // --- Auto-pair typed opener with a matching closer. ---
+          if (
+            selEarly.isCollapsed &&
+            Object.prototype.hasOwnProperty.call(CODE_PAIRS, e.key)
+          ) {
+            e.preventDefault();
+            const open = e.key;
+            const close = CODE_PAIRS[open];
+            document.execCommand("insertText", false, open + close);
+            // Nudge caret back one so it sits between the pair.
+            const s2 = window.getSelection();
+            if (s2 && s2.rangeCount > 0) {
+              const r = s2.getRangeAt(0);
+              try {
+                r.setStart(r.startContainer, Math.max(0, r.startOffset - 1));
+                r.collapse(true);
+                s2.removeAllRanges();
+                s2.addRange(r);
+              } catch {}
+            }
+            flush();
+            return;
+          }
+          // --- Backspace between an empty pair deletes both chars. ---
+          if (e.key === "Backspace" && selEarly.isCollapsed) {
+            const r = selEarly.getRangeAt(0);
+            const container = r.startContainer;
+            const offset = r.startOffset;
+            if (container.nodeType === Node.TEXT_NODE) {
+              const t = container.textContent ?? "";
+              const before = t[offset - 1];
+              const after = t[offset];
+              if (before && after && CODE_PAIRS[before] === after) {
+                e.preventDefault();
+                container.textContent = t.slice(0, offset - 1) + t.slice(offset + 1);
+                const r2 = document.createRange();
+                r2.setStart(container, offset - 1);
+                r2.collapse(true);
+                const s2 = window.getSelection();
+                s2?.removeAllRanges();
+                s2?.addRange(r2);
+                flush();
+                return;
+              }
+            }
+          }
+          // --- Enter: preserve indent; expand `{|}` (any pair) into a
+          //     block by adding an extra-indented middle line. ---
+          if (e.key === "Enter") {
+            const codeInner = preEarly.querySelector("code");
+            if (codeInner && anchorEarly && codeInner.contains(anchorEarly)) {
+              const fullText = codeInner.textContent ?? "";
+              const preRange = document.createRange();
+              preRange.selectNodeContents(codeInner);
+              preRange.setEnd(anchorEarly, selEarly.anchorOffset);
+              const caretOffset = preRange.toString().length;
+              const beforeStr = fullText.slice(0, caretOffset);
+              const afterStr = fullText.slice(caretOffset);
+              const lineStart = beforeStr.lastIndexOf("\n") + 1;
+              const currentLine = beforeStr.slice(lineStart);
+              const indent = (currentLine.match(/^[ \t]*/) || [""])[0];
+              const openBefore = beforeStr[caretOffset - 1];
+              const closeAfter = afterStr[0];
+              const shouldExpand =
+                openBefore &&
+                closeAfter &&
+                CODE_PAIRS[openBefore] === closeAfter;
+              e.preventDefault();
+              if (shouldExpand) {
+                const middle = "\n" + indent + CODE_INDENT;
+                const tail = "\n" + indent;
+                document.execCommand("insertText", false, middle + tail);
+                // Move caret back to the end of the middle line.
+                const s2 = window.getSelection();
+                if (s2 && s2.rangeCount > 0) {
+                  const r2 = s2.getRangeAt(0);
+                  try {
+                    r2.setStart(
+                      r2.startContainer,
+                      Math.max(0, r2.startOffset - tail.length)
+                    );
+                    r2.collapse(true);
+                    s2.removeAllRanges();
+                    s2.addRange(r2);
+                  } catch {}
+                }
+              } else {
+                document.execCommand("insertText", false, "\n" + indent);
+              }
+              flush();
+              return;
+            }
+          }
+        }
+      }
+
       if (e.key !== "Enter") return;
       const el = editorRef.current;
       if (!el) return;
@@ -766,13 +942,17 @@ export default function Editor() {
       const startEl = elNodeFromSelection(node);
 
       // 1) Inside <pre><code> — exit on a trailing-blank-line Enter.
+      //    Read from the <code> child so the toolbar's button text is
+      //    never counted as part of the code content.
       const codeEl = startEl?.closest("pre");
       if (codeEl) {
-        const codeText = codeEl.textContent ?? "";
+        const codeInner = codeEl.querySelector("code");
+        const codeText = codeInner?.textContent ?? "";
         if (codeText.endsWith("\n")) {
           e.preventDefault();
-          const codeInner = codeEl.querySelector("code") ?? codeEl;
-          codeInner.textContent = codeText.replace(/\n+$/, "");
+          if (codeInner) {
+            codeInner.textContent = codeText.replace(/\n+$/, "");
+          }
           let next = codeEl.nextElementSibling;
           if (!(next instanceof HTMLElement)) {
             const p = document.createElement("p");
@@ -875,7 +1055,28 @@ export default function Editor() {
     (e: React.MouseEvent<HTMLDivElement>) => {
       const el = editorRef.current;
       if (!el) return;
-      const target = e.target as Element;
+      const target = e.target as HTMLElement;
+
+      // Text/Code toggle inside a <pre>. Delegated here so the toolbar
+      // stays a plain DOM child of the contenteditable rather than a
+      // React portal — cheaper, and keeps caret placement predictable.
+      if (target.dataset && target.dataset.preMode) {
+        const pre = target.closest("pre");
+        if (pre) {
+          const next = target.dataset.preMode as CodeMode;
+          pre.dataset.codeMode = next;
+          pre
+            .querySelector(":scope > .pre-tb")
+            ?.querySelectorAll("button")
+            .forEach((b) => {
+              b.classList.toggle("active", b.dataset.preMode === next);
+            });
+          flush();
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
 
       const ensureAdjacentP = (
         pre: HTMLElement,

@@ -302,16 +302,45 @@ body {
   min-height: 1.6em;
   margin-top: 0.25rem;
 }
-.rich-editor pre::before {
-  content: ">_";
+/* In-block Text / Code toggle. `contenteditable=false` at the DOM level
+   keeps the caret out of it; user-select:none stops the toolbar from
+   being caught by a selection dragged across the code block. */
+.rich-editor .pre-tb {
   position: absolute;
   top: 0.35rem;
-  right: 0.6rem;
-  font-size: 0.65rem;
-  letter-spacing: 0.05em;
+  right: 0.5rem;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  z-index: 2;
+  user-select: none;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+.rich-editor .pre-tb button {
+  font-size: 10px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 5px;
   color: var(--muted);
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
-  opacity: 0.7;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  transition: background 120ms ease, color 120ms ease;
+}
+.rich-editor .pre-tb button:hover {
+  color: var(--foreground);
+}
+.rich-editor .pre-tb button.active {
+  background: var(--foreground);
+  color: var(--surface);
+}
+/* Add breathing room at the top of the code so the toolbar doesn't
+   sit on top of the first line. */
+.rich-editor pre {
+  padding-top: 2rem;
 }
 .rich-editor a {
   color: var(--accent);

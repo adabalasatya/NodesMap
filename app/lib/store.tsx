@@ -109,6 +109,7 @@ export type Action =
     }
   | { type: "TOGGLE_FILE_DONE"; payload: { id: string } }
   | { type: "RENAME_FILE"; payload: { id: string; title: string } }
+  | { type: "MOVE_FILE"; payload: { id: string; folderId: string } }
   | { type: "DELETE_FILE"; payload: { id: string } }
   | {
       type: "SET_VIEW";
@@ -402,6 +403,22 @@ function reducer(state: AppState, action: Action): AppState {
             : f
         ),
       };
+
+    case "MOVE_FILE": {
+      const { id, folderId } = action.payload;
+      // Ignore moves to a non-existent folder or the file's current one;
+      // guarding here keeps the reducer idempotent for the drag-drop UI.
+      const target = state.folders.find((f) => f.id === folderId);
+      if (!target) return state;
+      const file = state.files.find((f) => f.id === id);
+      if (!file || file.folderId === folderId) return state;
+      return {
+        ...state,
+        files: state.files.map((f) =>
+          f.id === id ? { ...f, folderId, updatedAt: Date.now() } : f
+        ),
+      };
+    }
 
     case "DELETE_FILE":
       return {

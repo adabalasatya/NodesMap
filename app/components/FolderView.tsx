@@ -18,6 +18,12 @@ import {
 } from "./icons";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import { useDialog } from "./Dialog";
+import {
+  readDragItem,
+  setDragItem,
+  hasNodesMapPayload,
+  type DragItem,
+} from "../lib/dnd";
 
 export default function FolderView() {
   const { state, dispatch } = useStore();
@@ -30,6 +36,47 @@ export default function FolderView() {
     y: number;
     items: MenuItem[];
   } | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  const isDescendantOf = (candidateAncestorId: string, folderId: string) => {
+    let cur: string | null | undefined = folderId;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur)) {
+      if (cur === candidateAncestorId) return true;
+      seen.add(cur);
+      cur = state.folders.find((f) => f.id === cur)?.parentId ?? null;
+    }
+    return false;
+  };
+
+  const canDropOn = (item: DragItem, targetFolderId: string | null): boolean => {
+    if (item.kind === "folder") {
+      if (item.id === targetFolderId) return false;
+      const currentParent = state.folders.find((f) => f.id === item.id)?.parentId ?? null;
+      if (currentParent === targetFolderId) return false;
+      if (targetFolderId && isDescendantOf(item.id, targetFolderId)) return false;
+      return true;
+    }
+    if (targetFolderId === null) return false;
+    const currentFolder = state.files.find((f) => f.id === item.id)?.folderId;
+    return currentFolder !== targetFolderId;
+  };
+
+  const performDrop = (item: DragItem, targetFolderId: string | null) => {
+    if (!canDropOn(item, targetFolderId)) return;
+    if (item.kind === "folder") {
+      dispatch({
+        type: "MOVE_FOLDER",
+        payload: { id: item.id, parentId: targetFolderId },
+      });
+    } else {
+      if (targetFolderId === null) return;
+      dispatch({
+        type: "MOVE_FILE",
+        payload: { id: item.id, folderId: targetFolderId },
+      });
+    }
+  };
 
   if (!folder) {
     return (
@@ -92,7 +139,30 @@ export default function FolderView() {
       <div className="flex items-center gap-3 mb-6">
         <button
           onClick={goBack}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--border)] hover:bg-[var(--surface-2)] text-sm transition"
+          onDragOver={(e) => {
+            if (!hasNodesMapPayload(e.dataTransfer)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            if (dropTarget !== "__parent__") setDropTarget("__parent__");
+          }}
+          onDragLeave={(e) => {
+            const related = e.relatedTarget as Node | null;
+            if (related && e.currentTarget.contains(related)) return;
+            if (dropTarget === "__parent__") setDropTarget(null);
+          }}
+          onDrop={(e) => {
+            const item = readDragItem(e.dataTransfer);
+            setDropTarget(null);
+            if (!item) return;
+            e.preventDefault();
+            performDrop(item, folder.parentId ?? null);
+          }}
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-sm transition ${
+            dropTarget === "__parent__"
+              ? "border-[var(--accent)] ring-2 ring-[var(--accent)] bg-[var(--surface-2)]"
+              : "border-[var(--border)] hover:bg-[var(--surface-2)]"
+          }`}
+          title={dropTarget === "__parent__" ? "Drop to move up one level" : "Back"}
         >
           <ChevronLeftIcon size={14} /> Back
         </button>
@@ -195,9 +265,34 @@ export default function FolderView() {
         >
           {subFolders.map((sub) => {
             const sp = selectFolderProgressDeep(state, sub.id);
+            const isDropHover = dropTarget === sub.id;
             return (
               <div
                 key={sub.id}
+                draggable
+                onDragStart={(e) => {
+                  setDragItem(e.dataTransfer, { kind: "folder", id: sub.id });
+                }}
+                onDragEnd={() => setDropTarget(null)}
+                onDragOver={(e) => {
+                  if (!hasNodesMapPayload(e.dataTransfer)) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (dropTarget !== sub.id) setDropTarget(sub.id);
+                }}
+                onDragLeave={(e) => {
+                  const related = e.relatedTarget as Node | null;
+                  if (related && e.currentTarget.contains(related)) return;
+                  if (dropTarget === sub.id) setDropTarget(null);
+                }}
+                onDrop={(e) => {
+                  const item = readDragItem(e.dataTransfer);
+                  setDropTarget(null);
+                  if (!item) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  performDrop(item, sub.id);
+                }}
                 onClick={() =>
                   dispatch({
                     type: "SET_VIEW",
@@ -216,7 +311,11 @@ export default function FolderView() {
                     items: folderItemMenu(sub.id, sub.name, dispatch, dialog),
                   });
                 }}
-                className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] p-5 min-h-[140px] flex flex-col cursor-pointer transition"
+                className={`rounded-2xl border p-5 min-h-[140px] flex flex-col cursor-pointer transition ${
+                  isDropHover
+                    ? "border-[var(--accent)] bg-[var(--surface-2)] ring-2 ring-[var(--accent)]"
+                    : "border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)]"
+                }`}
               >
                 <div className="flex items-center gap-2 mb-2">
                   {sub.emoji ? (
@@ -255,6 +354,10 @@ export default function FolderView() {
         {files.map((file) => (
           <div
             key={file.id}
+            draggable
+            onDragStart={(e) => {
+              setDragItem(e.dataTransfer, { kind: "file", id: file.id });
+            }}
             onClick={() =>
               dispatch({
                 type: "SET_VIEW",

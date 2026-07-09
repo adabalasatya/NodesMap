@@ -689,8 +689,32 @@ export default function Editor() {
       if (currentList) {
         const currentKind = detectListKind(currentList);
         if (currentKind === kind) {
-          // Toggle OFF — unwrap items back into paragraphs.
-          unwrapList(currentList);
+          // Toggle OFF. With a collapsed caret we only unwrap the
+          // *current* <li> so sibling bullets are untouched — this was
+          // the whole-list-collapses bug users kept hitting. If the
+          // selection spans multiple items (or we can't identify a
+          // single active item), fall back to unwrapping the whole
+          // list, which matches the natural "clear the entire list"
+          // intent for a broad selection.
+          const activeLi =
+            (startEl?.closest("li") as HTMLElement | null) ??
+            (sel?.focusNode
+              ? (elNodeFromSelection(sel.focusNode)?.closest(
+                  "li"
+                ) as HTMLElement | null)
+              : null);
+          const spansMultipleItems = (() => {
+            if (!sel || sel.isCollapsed) return false;
+            const a = elNodeFromSelection(sel.anchorNode!)?.closest("li");
+            const b = elNodeFromSelection(sel.focusNode!)?.closest("li");
+            return a && b && a !== b;
+          })();
+          if (activeLi && currentList.contains(activeLi) && !spansMultipleItems) {
+            const p = unwrapListItem(activeLi);
+            if (p) placeCaretIn(p);
+          } else {
+            unwrapList(currentList);
+          }
         } else {
           convertListInPlace(currentList, kind);
         }
@@ -823,11 +847,11 @@ export default function Editor() {
         return;
       }
 
-      // Code-mode niceties: auto-pair brackets/quotes, delete empty pairs
-      // on Backspace, and preserve indentation on Enter. Runs before the
-      // Enter-only bail-out so these fire for every key that hits an
-      // active code block. Text mode ignores everything and falls
-      // through to the browser's default keystroke handling.
+      // Code-mode niceties: auto-pair brackets/quotes, skip over an
+      // already-present closer, delete empty pairs on Backspace, and
+      // preserve/expand indentation on Enter. Runs before the Enter-
+      // only bail-out so these fire for every key that hits an active
+      // code block. Text mode falls through to browser defaults.
       const selEarly = window.getSelection();
       if (selEarly && selEarly.rangeCount > 0) {
         const anchorEarly = selEarly.anchorNode;
@@ -836,68 +860,123 @@ export default function Editor() {
           : null;
         const preEarly = startElEarly?.closest("pre");
         if (preEarly && preEarly.dataset.codeMode === "code") {
+          const codeInner = preEarly.querySelector("code");
+
+          /** Compute the caret's offset within `<code>`'s plain text.
+              Uses a Range so `<br>` / element boundaries collapse the
+              same way `.textContent` reports them. Returns -1 if the
+              caret isn't inside <code>. */
+          const caretOffsetInCode = (): number => {
+            if (!codeInner || !anchorEarly || !codeInner.contains(anchorEarly)) {
+              return -1;
+            }
+            const r = document.createRange();
+            r.selectNodeContents(codeInner);
+            r.setEnd(anchorEarly, selEarly.anchorOffset);
+            return r.toString().length;
+          };
+
+          /** Re-flatten <code>'s contents to a single text node and
+              place the caret at `targetOffset`. This side-steps the
+              browser-specific behaviour of execCommand("insertText")
+              with `\n` in <pre> (some rewrite it to <br>, which then
+              throws off text-offset math). */
+          const rewriteCode = (nextText: string, targetOffset: number) => {
+            if (!codeInner) return;
+            codeInner.textContent = nextText;
+            const textNode = codeInner.firstChild as Text | null;
+            const clamped = Math.min(
+              Math.max(0, targetOffset),
+              nextText.length
+            );
+            const range = document.createRange();
+            if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+              range.setStart(textNode, clamped);
+            } else {
+              range.setStart(codeInner, 0);
+            }
+            range.collapse(true);
+            selEarly.removeAllRanges();
+            selEarly.addRange(range);
+          };
+
+          // --- Skip-over closer: if the caret sits right before an
+          //     identical char (usually the auto-paired closer we just
+          //     inserted), consume the keypress and step over it
+          //     instead of typing a duplicate. ---
+          const CLOSERS = new Set([")", "]", "}", '"', "'", "`"]);
+          if (
+            codeInner &&
+            selEarly.isCollapsed &&
+            CLOSERS.has(e.key)
+          ) {
+            const caret = caretOffsetInCode();
+            if (caret >= 0) {
+              const fullText = codeInner.textContent ?? "";
+              if (fullText[caret] === e.key) {
+                e.preventDefault();
+                rewriteCode(fullText, caret + 1);
+                // No flush — nothing changed in text.
+                return;
+              }
+            }
+          }
+
           // --- Auto-pair typed opener with a matching closer. ---
           if (
+            codeInner &&
             selEarly.isCollapsed &&
             Object.prototype.hasOwnProperty.call(CODE_PAIRS, e.key)
           ) {
-            e.preventDefault();
-            const open = e.key;
-            const close = CODE_PAIRS[open];
-            document.execCommand("insertText", false, open + close);
-            // Nudge caret back one so it sits between the pair.
-            const s2 = window.getSelection();
-            if (s2 && s2.rangeCount > 0) {
-              const r = s2.getRangeAt(0);
-              try {
-                r.setStart(r.startContainer, Math.max(0, r.startOffset - 1));
-                r.collapse(true);
-                s2.removeAllRanges();
-                s2.addRange(r);
-              } catch {}
+            const caret = caretOffsetInCode();
+            if (caret >= 0) {
+              e.preventDefault();
+              const open = e.key;
+              const close = CODE_PAIRS[open];
+              const fullText = codeInner.textContent ?? "";
+              const next =
+                fullText.slice(0, caret) + open + close + fullText.slice(caret);
+              rewriteCode(next, caret + 1);
+              flush();
+              return;
             }
-            flush();
-            return;
           }
+
           // --- Backspace between an empty pair deletes both chars. ---
-          if (e.key === "Backspace" && selEarly.isCollapsed) {
-            const r = selEarly.getRangeAt(0);
-            const container = r.startContainer;
-            const offset = r.startOffset;
-            if (container.nodeType === Node.TEXT_NODE) {
-              const t = container.textContent ?? "";
-              const before = t[offset - 1];
-              const after = t[offset];
+          if (
+            codeInner &&
+            e.key === "Backspace" &&
+            selEarly.isCollapsed
+          ) {
+            const caret = caretOffsetInCode();
+            if (caret > 0) {
+              const fullText = codeInner.textContent ?? "";
+              const before = fullText[caret - 1];
+              const after = fullText[caret];
               if (before && after && CODE_PAIRS[before] === after) {
                 e.preventDefault();
-                container.textContent = t.slice(0, offset - 1) + t.slice(offset + 1);
-                const r2 = document.createRange();
-                r2.setStart(container, offset - 1);
-                r2.collapse(true);
-                const s2 = window.getSelection();
-                s2?.removeAllRanges();
-                s2?.addRange(r2);
+                const next =
+                  fullText.slice(0, caret - 1) + fullText.slice(caret + 1);
+                rewriteCode(next, caret - 1);
                 flush();
                 return;
               }
             }
           }
-          // --- Enter: preserve indent; expand `{|}` (any pair) into a
-          //     block by adding an extra-indented middle line. ---
-          if (e.key === "Enter") {
-            const codeInner = preEarly.querySelector("code");
-            if (codeInner && anchorEarly && codeInner.contains(anchorEarly)) {
+
+          // --- Enter: preserve indent; expand `{|}` (any pair) into
+          //     an indented block. Direct DOM rewrite avoids browsers'
+          //     inconsistent `\n`-vs-<br> handling in <pre>. ---
+          if (codeInner && e.key === "Enter") {
+            const caret = caretOffsetInCode();
+            if (caret >= 0) {
               const fullText = codeInner.textContent ?? "";
-              const preRange = document.createRange();
-              preRange.selectNodeContents(codeInner);
-              preRange.setEnd(anchorEarly, selEarly.anchorOffset);
-              const caretOffset = preRange.toString().length;
-              const beforeStr = fullText.slice(0, caretOffset);
-              const afterStr = fullText.slice(caretOffset);
+              const beforeStr = fullText.slice(0, caret);
+              const afterStr = fullText.slice(caret);
               const lineStart = beforeStr.lastIndexOf("\n") + 1;
               const currentLine = beforeStr.slice(lineStart);
               const indent = (currentLine.match(/^[ \t]*/) || [""])[0];
-              const openBefore = beforeStr[caretOffset - 1];
+              const openBefore = beforeStr[caret - 1];
               const closeAfter = afterStr[0];
               const shouldExpand =
                 openBefore &&
@@ -907,23 +986,12 @@ export default function Editor() {
               if (shouldExpand) {
                 const middle = "\n" + indent + CODE_INDENT;
                 const tail = "\n" + indent;
-                document.execCommand("insertText", false, middle + tail);
-                // Move caret back to the end of the middle line.
-                const s2 = window.getSelection();
-                if (s2 && s2.rangeCount > 0) {
-                  const r2 = s2.getRangeAt(0);
-                  try {
-                    r2.setStart(
-                      r2.startContainer,
-                      Math.max(0, r2.startOffset - tail.length)
-                    );
-                    r2.collapse(true);
-                    s2.removeAllRanges();
-                    s2.addRange(r2);
-                  } catch {}
-                }
+                const nextText = beforeStr + middle + tail + afterStr;
+                rewriteCode(nextText, caret + middle.length);
               } else {
-                document.execCommand("insertText", false, "\n" + indent);
+                const insertion = "\n" + indent;
+                const nextText = beforeStr + insertion + afterStr;
+                rewriteCode(nextText, caret + insertion.length);
               }
               flush();
               return;
@@ -1379,6 +1447,54 @@ function unwrapList(list: HTMLElement) {
     frag.appendChild(p);
   });
   parent.replaceChild(frag, list);
+}
+
+/**
+ * Un-list only the given <li>, leaving its siblings intact. The list is
+ * split around it:
+ *   before-items → stay in the original list (removed if empty)
+ *   this item    → becomes a <p> inserted between the two halves
+ *   after-items  → move into a cloned list of the same tag+class
+ *
+ * Returns the resulting <p> so callers can re-anchor the caret.
+ */
+function unwrapListItem(li: HTMLElement): HTMLElement | null {
+  const list = li.parentElement;
+  if (!list) return null;
+  const parent = list.parentNode;
+  if (!parent) return null;
+
+  const p = document.createElement("p");
+  while (li.firstChild) p.appendChild(li.firstChild);
+  if (!p.firstChild) p.appendChild(document.createElement("br"));
+
+  const siblings = Array.from(list.children) as HTMLElement[];
+  const idx = siblings.indexOf(li);
+  const after = siblings.slice(idx + 1);
+
+  // Build a tail list from the "after" items (if any) using the same
+  // tag + class so cb-list / rb-list / ol keep their marker style.
+  let tailList: HTMLElement | null = null;
+  if (after.length > 0) {
+    tailList = document.createElement(list.tagName.toLowerCase());
+    if (list.className) tailList.className = list.className;
+    after.forEach((sib) => tailList!.appendChild(sib));
+  }
+
+  li.remove();
+  const listAnchor = list.nextSibling;
+
+  // If nothing remains in the original list, delete it and put the <p>
+  // (plus optional tail) in its place; otherwise insert after it.
+  if (list.children.length === 0) {
+    parent.insertBefore(p, list);
+    list.remove();
+  } else {
+    parent.insertBefore(p, listAnchor);
+  }
+  if (tailList) parent.insertBefore(tailList, p.nextSibling);
+
+  return p;
 }
 
 function convertListInPlace(
